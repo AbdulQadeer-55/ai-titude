@@ -46,9 +46,11 @@ function App() {
   const [ttsProvider, setTtsProvider] = useState('gpt4o_mini');
   const [warnings, setWarnings] = useState({ pacing: '', instructions: '' });
   const [voiceSectionExpanded, setVoiceSectionExpanded] = useState(true);
-
-  const [musicLink,setMusicLink]=useState('')
-
+  const [musicPrompt, setMusicPrompt] = useState('');
+  const [musicLink, setMusicLink] = useState('');
+  const [musicError, setMusicError] = useState('');
+  const [isMusicLoading, setIsMusicLoading] = useState(false);
+  const [musicDuration, setMusicDuration] = useState(90);
 
   const textAreaRef = useRef(null);
 
@@ -133,18 +135,40 @@ function App() {
     []
   );
 
+  const musicPromptTemplates = useMemo(
+    () => ({
+      neutral: 'A 90-second ambient track with a neutral and balanced mood.',
+      sympathetic: 'A 120-second soft acoustic track with a sympathetic and comforting tone, featuring gentle guitar.',
+      sincere: 'A 90-second piano ballad with a sincere and heartfelt mood.',
+      calm: 'A 120-second chillout track with a calm and soothing atmosphere, featuring soft pads.',
+      serene: 'A 120-second orchestral piece with a serene and tranquil mood, featuring strings and harp.',
+      sadness: 'A 90-second melancholic piano track with a sad and reflective tone.',
+      happiness: 'A 90-second upbeat pop track with a happy and cheerful vibe, featuring bright synths.',
+      fear: 'A 90-second cinematic track with a fearful and tense atmosphere, featuring eerie strings.',
+      horror: 'A 90-second dark ambient track with a horrified and unsettling mood, featuring distorted drones.',
+      surprise: 'A 90-second dynamic electronic track with a surprised and energetic feel, featuring sudden drops.',
+      anger: 'A 90-second aggressive rock track with an angry and intense mood, featuring heavy guitars.',
+      rage: 'A 90-second intense dubstep track with an enraged and powerful vibe, featuring heavy bass.',
+      love: 'A 120-second romantic ballad with a loving and warm mood, featuring acoustic guitar and strings.',
+      excitement: 'A 90-second energetic house track with an excited and uplifting vibe, featuring tropical percussion.',
+      anxiety: 'A 90-second glitchy electronic track with an anxious and restless mood, featuring rapid arpeggios.',
+      disgust: 'A 90-second industrial track with a disgusted and gritty tone, featuring distorted synths.',
+    }),
+    []
+  );
+
   const gpt4oVoices = useMemo(
     () => [
-      {name: 'alloy', gender: 'NEUTRAL', language_code: 'ur-PK'},
-      {name: 'ash', gender: 'NEUTRAL', language_code: 'ur-PK'},
-      {name: 'ballad', gender: 'NEUTRAL', language_code: 'ur-PK'},
-      {name: 'coral', gender: 'NEUTRAL', language_code: 'ur-PK'},
-      {name: 'echo', gender: 'NEUTRAL', language_code: 'ur-PK'},
-      {name: 'fable', gender: 'NEUTRAL', language_code: 'ur-PK'},
-      {name: 'onyx', gender: 'NEUTRAL', language_code: 'ur-PK'},
-      {name: 'nova', gender: 'NEUTRAL', language_code: 'ur-PK'},
-      {name: 'sage', gender: 'NEUTRAL', language_code: 'ur-PK'},
-      {name: 'shimmer', gender: 'NEUTRAL', language_code: 'ur-PK'}
+      { name: 'alloy', gender: 'NEUTRAL', language_code: 'ur-PK' },
+      { name: 'ash', gender: 'NEUTRAL', language_code: 'ur-PK' },
+      { name: 'ballad', gender: 'NEUTRAL', language_code: 'ur-PK' },
+      { name: 'coral', gender: 'NEUTRAL', language_code: 'ur-PK' },
+      { name: 'echo', gender: 'NEUTRAL', language_code: 'ur-PK' },
+      { name: 'fable', gender: 'NEUTRAL', language_code: 'ur-PK' },
+      { name: 'onyx', gender: 'NEUTRAL', language_code: 'ur-PK' },
+      { name: 'nova', gender: 'NEUTRAL', language_code: 'ur-PK' },
+      { name: 'sage', gender: 'NEUTRAL', language_code: 'ur-PK' },
+      { name: 'shimmer', gender: 'NEUTRAL', language_code: 'ur-PK' },
     ],
     []
   );
@@ -401,9 +425,9 @@ function App() {
       if (field === 'style') {
         const styleDefaults = {
           'sports-coach': { tone: 'excited', pacing: 200 },
-          'bedtime-story': { tone: 'warm', pacing: 130},
+          'bedtime-story': { tone: 'warm', pacing: 130 },
           'professional': { tone: 'neutral', pacing: 150 },
-          'medieval-knight': { tone: 'noble', pacing: 140},
+          'medieval-knight': { tone: 'noble', pacing: 140 },
           'mad-scientist': { tone: 'chaotic', pacing: 180 },
           'patient-teacher': { tone: 'calm', pacing: 120 },
         };
@@ -479,7 +503,6 @@ function App() {
         { responseType: 'blob' }
       );
       const url = window.URL.createObjectURL(new Blob([response.data], { type: 'audio/mp3' }));
-      await generatePromptBasedMusic();
       setAudioUrl(url);
     } catch (error) {
       let message = 'An unexpected error occurred while generating audio.';
@@ -503,17 +526,71 @@ function App() {
     }
   };
 
+  const generatePromptBasedMusic = async () => {
+    // Stricter validation for musicPrompt
+    if (!musicPrompt || typeof musicPrompt !== 'string' || !musicPrompt.trim()) {
+      console.warn('Invalid music prompt:', musicPrompt);
+      setMusicError('Please enter a valid music prompt.');
+      return;
+    }
+    // Validate duration
+    if (!Number.isInteger(musicDuration) || musicDuration < 30 || musicDuration > 420) {
+      console.warn('Invalid music duration:', musicDuration);
+      setMusicError('Duration must be between 30 and 420 seconds.');
+      return;
+    }
+    setIsMusicLoading(true);
+    setMusicError('');
+    try {
+      console.log('Sending music generation request:', { prompt: musicPrompt, duration: musicDuration });
+      const call = await fetch('http://localhost:8000/api/prompt-based-music-generation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: musicPrompt.trim(), duration: musicDuration }),
+      });
+      if (!call.ok) {
+        const errorData = await call.json();
+        console.error('Music generation error:', errorData);
+        throw new Error(errorData.error?.message || 'Failed to generate music');
+      }
+      const response = await call.json();
+      console.log('Music API response:', response);
+      setMusicLink(response.music_file_path);
+    } catch (error) {
+      console.error('Failed to generate music:', error);
+      setMusicError(`Failed to generate music: ${error.message}`);
+    } finally {
+      setIsMusicLoading(false);
+    }
+  };
+
+  const applyEmotionBasedPrompt = () => {
+    const emotion = voiceSettings.emotion;
+    const newPrompt = musicPromptTemplates[emotion] || `A 90-second track with a ${emotion} mood`;
+    setMusicPrompt(newPrompt);
+    console.log('Applied emotion-based prompt:', newPrompt);
+  };
+
+  const applyPromptSuggestion = (prompt) => {
+    setMusicPrompt(prompt);
+    console.log('Applied suggested prompt:', prompt);
+  };
+
   const resetApp = () => {
     setFiles([]);
     setExtractedText('');
     setDetectedEmotion('');
     setDetectedGender('unknown');
     setAudioUrl(null);
+    setMusicLink('');
+    setMusicPrompt('');
+    setMusicError('');
     setErrorMessage('');
     setGenderWarning('');
     setTtsProvider('gpt4o_mini');
+    setMusicDuration(90);
     setVoiceSettings({
-      language_code: 'ur-PAK',
+      language_code: 'ur-PK',
       voice_name: 'coral',
       gender: 'NEUTRAL',
       speaking_rate: 1.0,
@@ -532,26 +609,15 @@ function App() {
       instruction_template: '',
       custom_instructions: '',
     });
+    console.log('App reset');
   };
-
-  //  Generate prompt based music
-  const generatePromptBasedMusic=async()=>{
-    const call=await fetch('http://localhost:8000/api/prompt-based-music-generation', {method: 'POST', body: JSON.stringify({prompt: extractedText})});
-    const response=await call.json();
-    console.log('res', response)
-    setMusicLink(response.music_file_path);
-
-
-
-             
-  }
 
   return (
     <div className={`App ${theme}`}>
       <header className="app-header">
         <div className="header-content">
           <h1>AI-titude 🎙️</h1>
-          <p>Extract text, detect emotions, and generate audio with AI</p>
+          <p>Extract text, detect emotions, and generate audio and music with AI</p>
           <button
             onClick={toggleTheme}
             className="theme-toggle"
@@ -567,6 +633,14 @@ function App() {
           <div className="error-message" role="alert">
             <FaExclamationTriangle aria-hidden="true" /> {errorMessage}
             <button onClick={() => setErrorMessage('')} className="close-error" aria-label="Dismiss error">
+              ✖
+            </button>
+          </div>
+        )}
+        {musicError && (
+          <div className="error-message" role="alert">
+            <FaExclamationTriangle aria-hidden="true" /> {musicError}
+            <button onClick={() => setMusicError('')} className="close-error" aria-label="Dismiss error">
               ✖
             </button>
           </div>
@@ -654,9 +728,9 @@ function App() {
                 tabIndex={0}
                 onKeyPress={(e) => e.key === 'Enter' && setVoiceSectionExpanded(!voiceSectionExpanded)}
                 aria-expanded={voiceSectionExpanded}
-                aria-label="Toggle voice settings section"
+                aria-label="Toggle voice and music settings section"
               >
-                🎙️ Voice Settings {voiceSectionExpanded ? '▼' : '▶'}
+                🎙️ Voice and Music Settings {voiceSectionExpanded ? '▼' : '▶'}
               </h2>
               {voiceSectionExpanded && (
                 <div className="voice-card">
@@ -679,7 +753,7 @@ function App() {
                           ...prev,
                           voice_name: e.target.value === 'gpt4o_mini' ? 'coral' : availableVoices[0]?.voices[0]?.name || '',
                           gender: e.target.value === 'gpt4o_mini' ? 'NEUTRAL' : availableVoices[0]?.voices[0]?.gender || 'FEMALE',
-                          language_code: e.target.value === 'gpt4o_mini' ? 'ur-PAK' : availableVoices[0]?.language_code || 'ur-PAK',
+                          language_code: e.target.value === 'gpt4o_mini' ? 'ur-PK' : availableVoices[0]?.language_code || 'ur-PK',
                         }));
                       }}
                     >
@@ -980,25 +1054,73 @@ function App() {
                         {warnings.instructions && <span className="voice-note warning">{warnings.instructions}</span>}
                       </div>
 
-                      <div className="form-group"> 
+                      <div className="form-group">
                         <label htmlFor="prompt-based-music-generation">
-                          Prompt-based Music Generation
+                          Music Prompt
                           <span className="tooltip">
                             <FaInfoCircle aria-hidden="true" />
                             <span className="tooltip-text">
-                              Generate music based on the provided prompt.
+                              Enter a prompt to generate music based on emotions and preferences (e.g., "A 90-second energetic house track").
                             </span>
                           </span>
-                          </label>
-                          <textarea
-                            id="prompt-based-music-generation"
-                            className="instructions-input"
-                            value={voiceSettings.prompt_based_music_generation}
-                            onChange={(e) => updateVoiceSetting('prompt_based_music_generation', e.target.value)}
-                            placeholder="e.g., Create a happy melody for a birthday party."
-                            rows="4"
-                            aria-label="Enter prompt for music generation"
-                          />
+                        </label>
+                        <textarea
+                          id="prompt-based-music-generation"
+                          className="instructions-input"
+                          value={musicPrompt}
+                          onChange={(e) => setMusicPrompt(e.target.value)}
+                          placeholder="e.g., A 90-second energetic house track with tropical vibes"
+                          rows="4"
+                          aria-label="Enter prompt for music generation"
+                        />
+                      </div>
+
+                      <div className="form-group">
+                        <label htmlFor="music-duration">
+                          Music Duration (seconds)
+                          <span className="tooltip">
+                            <FaInfoCircle aria-hidden="true" />
+                            <span className="tooltip-text">Set the duration of the music (30–420 seconds).</span>
+                          </span>
+                        </label>
+                        <input
+                          type="number"
+                          id="music-duration"
+                          value={musicDuration}
+                          onChange={(e) => setMusicDuration(Math.max(30, Math.min(420, parseInt(e.target.value) || 90)))}
+                          min="30"
+                          max="420"
+                          aria-label="Music duration in seconds"
+                        />
+                      </div>
+
+                      <div className="form-group">
+                        <label htmlFor="music-prompt-suggestion">
+                          Suggested Music Prompts
+                          <span className="tooltip">
+                            <FaInfoCircle aria-hidden="true" />
+                            <span className="tooltip-text">Select a suggested prompt based on emotions.</span>
+                          </span>
+                        </label>
+                        <select
+                          id="music-prompt-suggestion"
+                          onChange={(e) => applyPromptSuggestion(e.target.value)}
+                          aria-label="Select a suggested music prompt"
+                        >
+                          <option value="">Select a suggestion</option>
+                          {Object.entries(musicPromptTemplates).map(([emotion, template]) => (
+                            <option key={emotion} value={template}>
+                              {emotion.charAt(0).toUpperCase() + emotion.slice(1)}: {template}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          onClick={applyEmotionBasedPrompt}
+                          className="action-button"
+                          aria-label="Apply prompt based on current emotion"
+                        >
+                          Use Current Emotion
+                        </button>
                       </div>
                     </>
                   )}
@@ -1054,7 +1176,7 @@ function App() {
                   )}
 
                   <div className="form-group">
-                    <h3>🔊 Audio Output Settings Summary</h3>
+                    <h3>🔊 Audio and Music Output Settings Summary</h3>
                     <ul className="settings-summary">
                       <li>
                         <strong>Provider</strong>: {ttsProvider === 'gpt4o_mini' ? 'GPT-4o mini TTS' : 'Google Cloud TTS'}
@@ -1103,6 +1225,12 @@ function App() {
                           <li>
                             <strong>Instructions</strong>: {voiceSettings.custom_instructions || 'Auto-generated'}
                           </li>
+                          <li>
+                            <strong>Music Prompt</strong>: {musicPrompt || 'None'}
+                          </li>
+                          <li>
+                            <strong>Music Duration</strong>: {musicDuration} seconds
+                          </li>
                         </>
                       )}
                       {ttsProvider === 'google' && (
@@ -1131,12 +1259,29 @@ function App() {
               >
                 {isLoading ? <span className="spinner" aria-label="Loading"></span> : 'Generate Audio'}
               </button>
+              <button
+                onClick={generatePromptBasedMusic}
+                disabled={isMusicLoading || !musicPrompt || !musicPrompt.trim()}
+                className="generate-music"
+                aria-label="Generate music from prompt"
+              >
+                {isMusicLoading ? <span className="spinner" aria-label="Loading"></span> : 'Generate Music'}
+              </button>
               {audioUrl && (
                 <div className="audio-player">
                   <h3>Generated Audio</h3>
                   <audio controls src={audioUrl} aria-label="Play generated audio" />
                   <a href={audioUrl} download="generated_audio.mp3" className="download-button">
                     Download Audio
+                  </a>
+                </div>
+              )}
+              {musicLink && (
+                <div className="music-player">
+                  <h3>Generated Music</h3>
+                  <audio key={musicLink} controls src={musicLink} aria-label="Play generated music" />
+                  <a href={musicLink} download="generated_music.mp3" className="download-button">
+                    Download Music
                   </a>
                 </div>
               )}

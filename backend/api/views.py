@@ -33,9 +33,9 @@ LOCATION = os.getenv('LOCATION', 'us')
 PROCESSOR_ID = os.getenv('PROCESSOR_ID', '867de035aee8db09')
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY', '')
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
-LOUDLY_API_KEY = os.getenv('LOUDLY_API_KEY', '')  
-SECRET_KEY = os.getenv('SECRET_KEY', '')  
-GPT4O_MINI_TTS_API_KEY = os.getenv('OPENAI_API_KEY', '')  
+LOUDLY_API_KEY = os.getenv('LOUDLY_API_KEY', 'yfZX66sUgEGqQLrHpI-ysbcTNrMozGnXtqPlyD-6NXQ')
+SECRET_KEY = os.getenv('SECRET_KEY', '')
+GPT4O_MINI_TTS_API_KEY = os.getenv('OPENAI_API_KEY', '')
 genai.configure(api_key=GOOGLE_API_KEY)
 
 MAX_FILE_SIZE_ONLINE = 20 * 1024 * 1024
@@ -74,6 +74,14 @@ def load_urdu_dictionary(file_path=os.path.join(settings.BASE_DIR, 'api', 'urdu_
         return set()
 
 urdu_dictionary = load_urdu_dictionary()
+
+def create_error_response(code, message, details=None):
+    response = {'error': {'code': code, 'message': message}}
+    if details:
+        response['error']['details'] = details
+    logger.error(f"Error {code}: {message} - Details: {details}")
+    return JsonResponse(response, status=code)
+
 
 def create_error_response(code, message, details=None):
     response = {'error': {'code': code, 'message': message}}
@@ -264,60 +272,148 @@ def get_available_voices():
 
 @csrf_exempt
 def generate_music_with_prompt(request):
-    if request.method == "POST":
-        try:
-            body_unicode = request.body.decode("utf-8")
-            body = json.loads(body_unicode)
-            prompt = body.get("prompt")
-            print("music generation", prompt)
-            
-            test = body.get("test", True)
-            logger.debug(f"Incoming request body: {body_unicode}, prompt: {prompt}, test: {test}")
+    """
+    Generate music based on a user-provided prompt and duration using the Loudly API.
+    """
+    if request.method != "POST":
+        return create_error_response(405, "Only POST requests allowed")
 
-            if not prompt:
-                return JsonResponse({"error": "Prompt is required."}, status=400)
-            prompt = prompt.strip()
-            if len(prompt) < 5:
-                return JsonResponse({"error": "Prompt is too short. Minimum length is 5 characters."}, status=400)
+    try:
+        # Parse request body
+        body_unicode = request.body.decode("utf-8")
+        body = json.loads(body_unicode)
+        prompt = body.get("prompt")
+        duration = body.get("duration", 90)  # Default to 90 seconds
+        logger.debug(f"Incoming request: prompt={prompt}, duration={duration}")
 
-            logger.debug(f"LOUDLY_API_KEY: {LOUDLY_API_KEY}")
-            if not LOUDLY_API_KEY:
-                return JsonResponse({"error": "Loudly API key is not configured."}, status=500)
+        # Validate inputs
+        if prompt is None:
+            return create_error_response(400, "Prompt is missing", "The 'prompt' field is required in the request body")
+        if not isinstance(prompt, str):
+            return create_error_response(400, "Invalid prompt type", "Prompt must be a string")
+        prompt = prompt.strip()
+        if not prompt:
+            return create_error_response(400, "Prompt is empty", "Please provide a valid music prompt")
+        if len(prompt) < 5:
+            return create_error_response(400, "Prompt is too short", "Minimum length is 5 characters")
+        if not isinstance(duration, int) or not (30 <= duration <= 420):
+            return create_error_response(400, "Invalid duration", "Duration must be an integer between 30 and 420 seconds")
 
-            form_data = {"prompt": prompt}
-            if test:
-                form_data["test"] = "true"
-            url = "https://soundtracks-dev.loudly.com/api/ai/prompt/songs"
-            headers = {
-                "API-KEY": LOUDLY_API_KEY,
-            }
-            logger.debug(f"Sending request to Loudly API: URL={url}, headers={headers}, form_data={form_data}")
-            response = requests.post(url, headers=headers, data=form_data, timeout=10)
-            logger.debug(f"Loudly API response: status={response.status_code}, text={response.text}")
+        # Check Loudly API key
+        if not LOUDLY_API_KEY:
+            return create_error_response(500, "Loudly API key is not configured")
 
-            if response.status_code == 200:
+        # Common headers
+        headers = {
+            "API-KEY": LOUDLY_API_KEY,
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "AI-titude/1.0",
+            "Cache-Control": "no-cache"
+        }
+
+        # Try multiple payload formats
+        payload_variations = [
+            {"prompt": prompt, "duration": duration},
+            {"Prompt": prompt, "duration": duration},
+            {"data": {"prompt": prompt, "duration": duration}}
+        ]
+
+        # Try multiple endpoints
+        endpoints = [
+            "https://soundtracks-dev.loudly.com/api/ai/prompt/songs",
+            "https://soundtracks.loudly.com/b2b/ai/prompt/songs"
+        ]
+
+        response = None
+        for endpoint in endpoints:
+            for payload in payload_variations:
+                logger.debug(f"Attempting Loudly API: URL={endpoint}, headers={headers}, payload={payload}")
                 try:
-                    return JsonResponse(response.json(), status=200)
-                except ValueError:
-                    return JsonResponse({"error": "Invalid JSON response from Loudly API."}, status=500)
-            else:
+                    response = requests.post(endpoint, headers=headers, json=payload, timeout=30)
+                    logger.debug(f"Loudly API response: status={response.status_code}, text={response.text}")
+                    
+                    if response.status_code == 200:
+                        try:
+                            response_data = response.json()
+                            if not response_data.get("music_file_path"):
+                                logger.error("Loudly API response missing music_file_path")
+                                return create_error_response(500, "Invalid response from Loudly API", "Missing music_file_path")
+                            logger.info(f"Music generated successfully: {response_data}")
+                            return JsonResponse(response_data, status=200)
+                        except ValueError:
+                            logger.error("Invalid JSON response from Loudly API")
+                            return create_error_response(500, "Invalid JSON response from Loudly API")
+                    
+                    elif response.status_code != 400:
+                        # If not a 400 error, stop trying this endpoint
+                        break
+                    
+                except requests.RequestException as e:
+                    logger.error(f"Network error calling Loudly API at {endpoint}: {str(e)}")
+                    continue
+
+            if response and response.status_code != 200:
                 try:
                     error_data = response.json()
+                    logger.error(f"Loudly API error at {endpoint}: {error_data}")
+                    return create_error_response(response.status_code, "Failed to generate music", error_data.get("error", response.text))
                 except ValueError:
-                    error_data = {"error": response.text}
-                return JsonResponse(error_data, status=response.status_code)
+                    logger.error(f"Loudly API error at {endpoint}: status={response.status_code}, text={response.text}")
+                    return create_error_response(response.status_code, "Failed to generate music", response.text)
 
-        except json.JSONDecodeError:
-            logger.error("Invalid JSON in request body")
-            return JsonResponse({"error": "Invalid JSON format in request body."}, status=400)
+        # If all JSON attempts fail, try form data as a fallback
+        form_headers = {
+            "API-KEY": LOUDLY_API_KEY,
+            "Accept": "application/json",
+            "User-Agent": "AI-titude/1.0",
+            "Cache-Control": "no-cache"
+        }
+        form_data = {"prompt": prompt, "duration": str(duration)}
+        logger.debug(f"Attempting Loudly API with form data: URL={endpoints[0]}, headers={form_headers}, form_data={form_data}")
+        try:
+            response = requests.post(endpoints[0], headers=form_headers, data=form_data, timeout=30)
+            logger.debug(f"Loudly API form data response: status={response.status_code}, text={response.text}")
+            
+            if response.status_code == 200:
+                try:
+                    response_data = response.json()
+                    if not response_data.get("music_file_path"):
+                        logger.error("Loudly API response missing music_file_path")
+                        return create_error_response(500, "Invalid response from Loudly API", "Missing music_file_path")
+                    logger.info(f"Music generated successfully: {response_data}")
+                    return JsonResponse(response_data, status=200)
+                except ValueError:
+                    logger.error("Invalid JSON response from Loudly API")
+                    return create_error_response(500, "Invalid JSON response from Loudly API")
+            
+            try:
+                error_data = response.json()
+                logger.error(f"Loudly API form data error: {error_data}")
+                return create_error_response(response.status_code, "Failed to generate music", error_data.get("error", response.text))
+            except ValueError:
+                logger.error(f"Loudly API form data error: status={response.status_code}, text={response.text}")
+                return create_error_response(response.status_code, "Failed to generate music", response.text)
+        
         except requests.RequestException as e:
-            logger.error(f"Network error calling Loudly API: {str(e)}")
-            return JsonResponse({"error": f"Network error: {str(e)}"}, status=500)
-        except Exception as e:
-            logger.error(f"Error in generate_music_with_prompt: {str(e)}", exc_info=True)
-            return JsonResponse({"error": str(e)}, status=500)
-    else:
-        return JsonResponse({"error": "Only POST requests allowed"}, status=405)
+            logger.error(f"Network error calling Loudly API with form data: {str(e)}")
+            return create_error_response(500, "Network error", str(e))
+
+        # If all attempts fail
+        return create_error_response(400, "Failed to generate music", "All attempts to contact Loudly API failed. Please check API configuration.")
+
+    except json.JSONDecodeError:
+        logger.error("Invalid JSON in request body")
+        return create_error_response(400, "Invalid JSON format in request body")
+    except requests.RequestException as e:
+        logger.error(f"Network error calling Loudly API: {str(e)}")
+        return create_error_response(500, "Network error", str(e))
+    except Exception as e:
+        logger.error(f"Unexpected error in generate_music_with_prompt: {str(e)}", exc_info=True)
+        return create_error_response(500, "An unexpected error occurred", str(e))
+
+
+
 
 def text_to_speech(text, voice_settings_list, base_file_name, detected_gender, tts_provider="google"):
     logger.debug(f"Starting text_to_speech: provider={tts_provider}, text_length={len(text)}, voice_settings={voice_settings_list}")
