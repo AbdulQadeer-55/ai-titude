@@ -250,21 +250,6 @@ def get_available_voices():
         # Add OpenAI GPT-4o mini TTS voices
         gpt4o_voices = [
             {
-                'language_code': 'en-US',
-                'voices': [
-                    {'name': 'alloy', 'gender': 'NEUTRAL', 'language_code': 'en-US'},
-                    {'name': 'ash', 'gender': 'NEUTRAL', 'language_code': 'en-US'},
-                    {'name': 'ballad', 'gender': 'NEUTRAL', 'language_code': 'en-US'},
-                    {'name': 'coral', 'gender': 'NEUTRAL', 'language_code': 'en-US'},
-                    {'name': 'echo', 'gender': 'NEUTRAL', 'language_code': 'en-US'},
-                    {'name': 'fable', 'gender': 'NEUTRAL', 'language_code': 'en-US'},
-                    {'name': 'onyx', 'gender': 'NEUTRAL', 'language_code': 'en-US'},
-                    {'name': 'nova', 'gender': 'NEUTRAL', 'language_code': 'en-US'},
-                    {'name': 'sage', 'gender': 'NEUTRAL', 'language_code': 'en-US'},
-                    {'name': 'shimmer', 'gender': 'NEUTRAL', 'language_code': 'en-US'}
-                ]
-            },
-            {
                 'language_code': 'ur-PK',
                 'voices': [
                     {'name': 'alloy', 'gender': 'NEUTRAL', 'language_code': 'ur-PK'},
