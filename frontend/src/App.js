@@ -19,7 +19,7 @@ function App() {
   const [currentStart, setCurrentStart] = useState(null);
   const [currentEnd, setCurrentEnd] = useState(null);
   const [voiceSettings, setVoiceSettings] = useState({
-    language_code: 'en-US',
+    language_code: 'ur-PK',
     voice_name: 'coral',
     gender: 'NEUTRAL',
     speaking_rate: 1.0,
@@ -135,16 +135,6 @@ function App() {
 
   const gpt4oVoices = useMemo(
     () => [
-      { name: 'alloy', gender: 'NEUTRAL', language_code: 'en-US' },
-      { name: 'ash', gender: 'NEUTRAL', language_code: 'en-US' },
-      { name: 'ballad', gender: 'NEUTRAL', language_code: 'en-US' },
-      { name: 'coral', gender: 'NEUTRAL', language_code: 'en-US' },
-      { name: 'echo', gender: 'NEUTRAL', language_code: 'en-US' },
-      { name: 'fable', gender: 'NEUTRAL', language_code: 'en-US' },
-      { name: 'onyx', gender: 'NEUTRAL', language_code: 'en-US' },
-      { name: 'nova', gender: 'NEUTRAL', language_code: 'en-US' },
-      { name: 'sage', gender: 'NEUTRAL', language_code: 'en-US' },
-      { name: 'shimmer', gender: 'NEUTRAL', language_code: 'en-US' },
       {name: 'alloy', gender: 'NEUTRAL', language_code: 'ur-PK'},
       {name: 'ash', gender: 'NEUTRAL', language_code: 'ur-PK'},
       {name: 'ballad', gender: 'NEUTRAL', language_code: 'ur-PK'},
@@ -175,7 +165,7 @@ function App() {
         const response = await axios.get('http://localhost:8000/api/available-voices/');
         setAvailableVoices(response.data.voices);
         if (response.data.voices.length > 0 && ttsProvider === 'google') {
-          const firstLanguage = response.data.voices.find((lang) => lang.language_code === 'en-US') || response.data.voices[0];
+          const firstLanguage = response.data.voices.find((lang) => lang.language_code === 'ur-PAK') || response.data.voices[0];
           const firstVoice = firstLanguage.voices[0];
           setVoiceSettings((prev) => ({
             ...prev,
@@ -523,7 +513,7 @@ function App() {
     setGenderWarning('');
     setTtsProvider('gpt4o_mini');
     setVoiceSettings({
-      language_code: 'en-US',
+      language_code: 'ur-PAK',
       voice_name: 'coral',
       gender: 'NEUTRAL',
       speaking_rate: 1.0,
@@ -689,7 +679,7 @@ function App() {
                           ...prev,
                           voice_name: e.target.value === 'gpt4o_mini' ? 'coral' : availableVoices[0]?.voices[0]?.name || '',
                           gender: e.target.value === 'gpt4o_mini' ? 'NEUTRAL' : availableVoices[0]?.voices[0]?.gender || 'FEMALE',
-                          language_code: e.target.value === 'gpt4o_mini' ? 'en-US' : availableVoices[0]?.language_code || 'en-US',
+                          language_code: e.target.value === 'gpt4o_mini' ? 'ur-PAK' : availableVoices[0]?.language_code || 'ur-PAK',
                         }));
                       }}
                     >
@@ -714,7 +704,6 @@ function App() {
                     >
                       {ttsProvider === 'gpt4o_mini' ? (
                         <>
-                          <option value="en-US">en-US</option>
                           <option value="ur-PK">ur-PK</option>
                         </>
                       ) : availableVoices.length === 0 ? (
