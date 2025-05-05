@@ -23,14 +23,11 @@ from requests.exceptions import RequestException
 from pydub import AudioSegment
 from django.views.decorators.csrf import csrf_exempt
 
-# Load environment variables from .env file in the root directory
 load_dotenv()
 
-# Set up logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-# Configuration
 PROJECT_ID = os.getenv('PROJECT_ID', '585624190112')
 LOCATION = os.getenv('LOCATION', 'us')
 PROCESSOR_ID = os.getenv('PROCESSOR_ID', '867de035aee8db09')
@@ -39,19 +36,16 @@ OPENAI_API_KEY = os.getenv('OPENAI_API_KEY', '')
 LOUDLY_API_KEY = os.getenv('LOUDLY_API_KEY', '')  
 SECRET_KEY = os.getenv('SECRET_KEY', '')  
 GPT4O_MINI_TTS_API_KEY = os.getenv('OPENAI_API_KEY', '')  
-# Configure Gemini API
 genai.configure(api_key=GOOGLE_API_KEY)
 
-# Document AI Limits
-MAX_FILE_SIZE_ONLINE = 20 * 1024 * 1024  # 20 MB
-MAX_FILE_SIZE_BATCH = 1 * 1024 * 1024 * 1024  # 1 GB
-MAX_IMAGE_RESOLUTION = 40 * 1000000  # 40 megapixels
+MAX_FILE_SIZE_ONLINE = 20 * 1024 * 1024
+MAX_FILE_SIZE_BATCH = 1 * 1024 * 1024 * 1024
+MAX_IMAGE_RESOLUTION = 40 * 1000000
 MAX_FILES_PER_BATCH = 5000
 MAX_PAGES_ONLINE_DEFAULT = 15
 MAX_PAGES_IMAGELESS = 30
 MAX_TEXT_LENGTH = 10000
 
-# Updated Emotion mapping (aligned with frontend's 16 emotions)
 EMOTION_MAPPING = {
     "neutral": "neutral",
     "sympathetic": "sympathetic",
@@ -71,7 +65,6 @@ EMOTION_MAPPING = {
     "disgust": "disgusted"
 }
 
-# Load Urdu dictionary
 def load_urdu_dictionary(file_path=os.path.join(settings.BASE_DIR, 'api', 'urdu_words.txt')):
     try:
         with open(file_path, "r", encoding="utf-8") as f:
@@ -82,7 +75,6 @@ def load_urdu_dictionary(file_path=os.path.join(settings.BASE_DIR, 'api', 'urdu_
 
 urdu_dictionary = load_urdu_dictionary()
 
-# Helper function for error responses
 def create_error_response(code, message, details=None):
     response = {'error': {'code': code, 'message': message}}
     if details:
@@ -90,7 +82,6 @@ def create_error_response(code, message, details=None):
     logger.error(f"Error {code}: {message} - Details: {details}")
     return JsonResponse(response, status=code)
 
-# Document AI Functions
 def process_document(file_path, mime_type, is_batch=False):
     try:
         credentials_path = "/home/abdulqadeer/Downloads/ai-titude/credentials.json"
@@ -160,7 +151,6 @@ def extract_text_from_file(file_path, file_extension):
         logger.error(f"Error extracting text from file: {str(e)}")
         raise
 
-# Gemini Functions
 def get_gemini_response(prompt, document_text):
     try:
         model = genai.GenerativeModel('gemini-1.5-flash')
@@ -221,7 +211,6 @@ def detect_gender_with_ai(text):
         logger.error(f"Failed to detect gender: {str(e)}")
         raise
 
-# Fetch Available Voices
 def get_available_voices():
     try:
         credentials_path = "/home/abdulqadeer/Downloads/ai-titude/credentials.json"
@@ -247,7 +236,6 @@ def get_available_voices():
                 'language_code': lang,
                 'voices': sorted(language_voices[lang], key=lambda x: (x['gender'], x['name']))
             })
-        # Add OpenAI GPT-4o mini TTS voices
         gpt4o_voices = [
             {
                 'language_code': 'ur-PK',
@@ -274,48 +262,35 @@ def get_available_voices():
         logger.error(f"Error fetching available voices: {str(e)}")
         raise
 
-
-
-@csrf_exempt  # Use this during development only
+@csrf_exempt
 def generate_music_with_prompt(request):
     if request.method == "POST":
         try:
-            # Parse request body
             body_unicode = request.body.decode("utf-8")
             body = json.loads(body_unicode)
             prompt = body.get("prompt")
-            #check what's in the prompt
             print("music generation", prompt)
             
-            # duration = body.get("duration")  # Optional: duration in seconds
-            test = body.get("test", True) # Optional: test mode (boolean)
-            # structure_id = body.get("structure_id")  # Optional: structure ID
-
+            test = body.get("test", True)
             logger.debug(f"Incoming request body: {body_unicode}, prompt: {prompt}, test: {test}")
 
-            # Validate prompt
             if not prompt:
                 return JsonResponse({"error": "Prompt is required."}, status=400)
             prompt = prompt.strip()
             if len(prompt) < 5:
                 return JsonResponse({"error": "Prompt is too short. Minimum length is 5 characters."}, status=400)
 
-            # Validate API key
             logger.debug(f"LOUDLY_API_KEY: {LOUDLY_API_KEY}")
             if not LOUDLY_API_KEY:
                 return JsonResponse({"error": "Loudly API key is not configured."}, status=500)
 
-            # Prepare form data
             form_data = {"prompt": prompt}
             if test:
-                form_data["test"] = "true"  # Set test mode to true if specified
-            url = "https://soundtracks-dev.loudly.com/api/ai/prompt/songs"  # Replace with the actual endpoint
-            # Add optional parameters if provided
+                form_data["test"] = "true"
+            url = "https://soundtracks-dev.loudly.com/api/ai/prompt/songs"
             headers = {
                 "API-KEY": LOUDLY_API_KEY,
             }
-            # Add any other headers if required by the API
-            # headers["Content-Type"] = "application/json"  # Uncomment if required
             logger.debug(f"Sending request to Loudly API: URL={url}, headers={headers}, form_data={form_data}")
             response = requests.post(url, headers=headers, data=form_data, timeout=10)
             logger.debug(f"Loudly API response: status={response.status_code}, text={response.text}")
@@ -343,7 +318,6 @@ def generate_music_with_prompt(request):
             return JsonResponse({"error": str(e)}, status=500)
     else:
         return JsonResponse({"error": "Only POST requests allowed"}, status=405)
-
 
 def text_to_speech(text, voice_settings_list, base_file_name, detected_gender, tts_provider="google"):
     logger.debug(f"Starting text_to_speech: provider={tts_provider}, text_length={len(text)}, voice_settings={voice_settings_list}")
@@ -376,16 +350,12 @@ def text_to_speech(text, voice_settings_list, base_file_name, detected_gender, t
             pause_frequency_match = re.search(r'pause frequency set to (\w+)', instructions)
             emphasis_match = re.search(r'Emphasize the following words: ([\w\s,آ-ی]+)\.', instructions)
 
-            # If the standard format doesn't match, try parsing the alternative format: "Speak with a {tone} tone and a slight smile"
             if not emotion_match:
-                # Alternative format: "Speak with a bright, cheerful tone and a slight smile"
                 alt_emotion_tone_match = re.search(r'Speak with a ([\w\s,]+) tone', instructions)
                 smile_match = re.search(r'and a slight smile', instructions)
 
                 if alt_emotion_tone_match:
-                    tone_description = alt_emotion_tone_match.group(1).lower()  # e.g., "bright, cheerful"
-                    # Map tone description to a valid tone and emotion
-                    # For simplicity, we'll map "bright, cheerful" to tone="excited" and emotion="happiness"
+                    tone_description = alt_emotion_tone_match.group(1).lower()
                     tone_mapping = {
                         "bright, cheerful": "excited",
                         "cheerful": "excited",
@@ -400,24 +370,20 @@ def text_to_speech(text, voice_settings_list, base_file_name, detected_gender, t
                         "calm": "calm",
                         "soothing": "serene",
                     }
-                    # Default to "excited" if tone not found
                     tone = tone_mapping.get(tone_description, "excited")
-                    # Default to "happiness" if emotion not found
                     emotion = emotion_mapping_alt.get(tone_description, "happiness")
-                    # If "and a slight smile" is present, reinforce the emotion as "happiness"
                     if smile_match:
                         emotion = "happiness"
-                    emotion_intensity = 70  # Default intensity
+                    emotion_intensity = 70
                     secondary_emotion = "none"
                     secondary_emotion_intensity = 0
-                    style = "conversational"  # Default style
-                    pacing = 100  # Default pacing
-                    pause_frequency = "medium"  # Default pause frequency
-                    emphasis_words = None  # No emphasis words in this format
+                    style = "conversational"
+                    pacing = 100
+                    pause_frequency = "medium"
+                    emphasis_words = None
                 else:
                     raise ValueError("Invalid instructions format. Expected format: 'Speak in a {emotion} tone with {intensity}% intensity...' or 'Speak with a {tone} tone and a slight smile'")
             else:
-                # Extract settings from standard format
                 emotion = emotion_match.group(1).lower() if emotion_match else None
                 emotion_intensity = int(emotion_match.group(2)) if emotion_match else 70
                 secondary_emotion = secondary_emotion_match.group(1).lower() if secondary_emotion_match else 'none'
@@ -428,25 +394,21 @@ def text_to_speech(text, voice_settings_list, base_file_name, detected_gender, t
                 pause_frequency = pause_frequency_match.group(1).lower() if pause_frequency_match else 'medium'
                 emphasis_words = emphasis_match.group(1).strip() if emphasis_match else None
 
-            # Validate emotions
             if emotion not in valid_emotions:
                 raise ValueError(f"Invalid base emotion: {emotion}. Supported emotions: {valid_emotions}")
             if secondary_emotion != 'none' and secondary_emotion not in valid_emotions:
                 raise ValueError(f"Invalid secondary emotion: {secondary_emotion}. Supported emotions: {valid_emotions}")
 
-            # Validate intensities
             if not (0 <= emotion_intensity <= 100):
                 raise ValueError(f"Base emotion intensity must be between 0 and 100, got {emotion_intensity}")
             if not (0 <= secondary_emotion_intensity <= 100):
                 raise ValueError(f"Secondary emotion intensity must be between 0 and 100, got {secondary_emotion_intensity}")
 
-            # Validate tone
             valid_tones = ['empathetic', 'solution-focused', 'gentle', 'authoritative', 'warm',
                            'soothing', 'excited', 'noble', 'chaotic', 'calm']
             if tone not in valid_tones:
                 raise ValueError(f"Invalid tone: {tone}. Supported tones: {valid_tones}")
 
-            # Validate style
             valid_styles = ['conversational', 'professional', 'dramatic', 'monotone', 'narrative', 'poetic',
                             'motivational', 'whispered', 'sarcastic', 'childlike', 'commanding', 'meditative',
                             'sports-coach', 'bedtime-story', 'medieval-knight', 'mad-scientist', 'patient-teacher',
@@ -454,34 +416,27 @@ def text_to_speech(text, voice_settings_list, base_file_name, detected_gender, t
             if style not in valid_styles:
                 raise ValueError(f"Invalid style: {style}. Supported styles: {valid_styles}")
 
-            # Validate pacing
             if not (50 <= pacing <= 200):
                 raise ValueError(f"Pacing must be between 50% and 200%, got {pacing}%")
 
-            # Validate pause frequency
             valid_pause_frequencies = ['low', 'medium', 'high']
             if pause_frequency not in valid_pause_frequencies:
                 raise ValueError(f"Invalid pause frequency: {pause_frequency}. Supported values: {valid_pause_frequencies}")
 
-            # Adjust text for emphasis if emphasis words are provided
             if emphasis_words:
                 words_to_emphasize = [word.strip() for word in emphasis_words.split(',')]
                 for word in words_to_emphasize:
                     text = text.replace(word, f'<emphasis level="strong">{word}</emphasis>')
 
-            # Adjust speaking rate based on pacing (pacing is a percentage, 100% = normal speed)
-            # OpenAI TTS accepts speed as a multiplier (0.25 to 4.0), so we map 50%-200% to 0.5-2.0
             speed = pacing / 100.0
             if speed < 0.5:
                 speed = 0.5
             elif speed > 2.0:
                 speed = 2.0
 
-            # Prepare plain text (no SSML) with spaces for natural pauses
-            plain_text = text.replace('.', '. ')  # Add space after periods for natural pauses
+            plain_text = text.replace('.', '. ')
             print(f"Plain Text Input: {plain_text}")
 
-            # Prepare API request
             headers = {
                 "Authorization": f"Bearer {GPT4O_MINI_TTS_API_KEY}",
                 "Content-Type": "application/json"
@@ -491,7 +446,7 @@ def text_to_speech(text, voice_settings_list, base_file_name, detected_gender, t
                 "input": plain_text,
                 "voice": voice_settings['voice_name'],
                 "response_format": "mp3",
-                "speed": speed  # Pass the adjusted speed directly
+                "speed": speed
             }
             if 'instructions' in voice_settings:
                 payload['instructions'] = voice_settings['instructions']
@@ -509,7 +464,6 @@ def text_to_speech(text, voice_settings_list, base_file_name, detected_gender, t
                 logger.error(f"GPT-4o mini TTS API error: {response.status_code} - {response.text}")
                 raise Exception(f"GPT-4o mini TTS API error: {response.text}")
             
-            # Save audio
             final_file_name = f"{base_file_name.rsplit('.', 1)[0]}.mp3"
             final_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
             with open(final_temp.name, "wb") as out:
@@ -519,7 +473,6 @@ def text_to_speech(text, voice_settings_list, base_file_name, detected_gender, t
             return final_temp.name, final_file_name, None
         
         else:
-            # Google Cloud TTS
             logger.debug("Using Google Cloud TTS")
             required_fields = ['language_code', 'voice_name', 'gender']
             if not all(key in voice_settings for key in required_fields):
@@ -583,7 +536,6 @@ def text_to_speech(text, voice_settings_list, base_file_name, detected_gender, t
         logger.error(f"Error generating audio: {str(e)}")
         raise
 
-# API Endpoints
 @api_view(['POST'])
 def analyze_files(request):
     logger.debug("Received analyze_files request")
