@@ -1,0 +1,9 @@
+{
+  "dependencies": {
+    "@tsparticles/react": "^3.0.0",
+    "react-icons": "^5.5.0",
+    "react-particles": "^2.12.2",
+    "react-tooltip": "^5.28.0",
+    "tsparticles": "^3.8.1"
+  }
+}
