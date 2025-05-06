@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 from requests.exceptions import RequestException
 from pydub import AudioSegment
 from django.views.decorators.csrf import csrf_exempt
+import io
 
 load_dotenv()
 
@@ -74,14 +75,6 @@ def load_urdu_dictionary(file_path=os.path.join(settings.BASE_DIR, 'api', 'urdu_
         return set()
 
 urdu_dictionary = load_urdu_dictionary()
-
-def create_error_response(code, message, details=None):
-    response = {'error': {'code': code, 'message': message}}
-    if details:
-        response['error']['details'] = details
-    logger.error(f"Error {code}: {message} - Details: {details}")
-    return JsonResponse(response, status=code)
-
 
 def create_error_response(code, message, details=None):
     response = {'error': {'code': code, 'message': message}}
@@ -412,9 +405,6 @@ def generate_music_with_prompt(request):
         logger.error(f"Unexpected error in generate_music_with_prompt: {str(e)}", exc_info=True)
         return create_error_response(500, "An unexpected error occurred", str(e))
 
-
-
-
 def text_to_speech(text, voice_settings_list, base_file_name, detected_gender, tts_provider="google"):
     logger.debug(f"Starting text_to_speech: provider={tts_provider}, text_length={len(text)}, voice_settings={voice_settings_list}")
     try:
@@ -693,22 +683,93 @@ def generate_audio(request):
         voice_settings_list = data.get('voice_settings_list', [])
         detected_gender = data.get('detected_gender', 'unknown')
         tts_provider = data.get('tts_provider', 'google')
-        
+        use_background_music = data.get('use_background_music', False)
+        music_file_url = data.get('music_file_url')
+        music_volume_db = data.get('music_volume_db', -20.0)
+
+        # Validate inputs
         if not text:
             return create_error_response(400, "No text provided.")
+        if len(text) > MAX_TEXT_LENGTH:
+            return create_error_response(400, "Text exceeds maximum length", f"Maximum {MAX_TEXT_LENGTH} characters allowed")
         if not voice_settings_list or not isinstance(voice_settings_list, list):
             return create_error_response(400, "Invalid voice settings.")
-        
+        if tts_provider not in ['google', 'gpt4o_mini']:
+            return create_error_response(400, "Invalid TTS provider", "Choose 'google' or 'gpt4o_mini'")
+        if detected_gender not in ['male', 'female', 'unknown']:
+            return create_error_response(400, "Invalid detected gender", "Must be 'male', 'female', or 'unknown'")
+        if not isinstance(use_background_music, bool):
+            return create_error_response(400, "Invalid use_background_music", "Must be a boolean")
+        if use_background_music and not music_file_url:
+            return create_error_response(400, "Music file URL required", "Provide 'music_file_url' when 'use_background_music' is true")
+        if use_background_music and not isinstance(music_volume_db, (int, float)):
+            return create_error_response(400, "Invalid music volume", "music_volume_db must be a number")
+        if use_background_music and (music_volume_db < -30.0 or music_volume_db > 0.0):
+            return create_error_response(400, "Invalid music volume", "music_volume_db must be between -30.0 and 0.0 dB")
+
+        # Generate audio using text_to_speech
         base_file_name = "generated_audio"
         audio_file, audio_file_name, warning = text_to_speech(text, voice_settings_list, base_file_name, detected_gender, tts_provider)
-        with open(audio_file, 'rb') as f:
+
+        # Load generated audio
+        audio_segment = AudioSegment.from_mp3(audio_file)
+
+        # Handle background music if enabled
+        if use_background_music and music_file_url:
+            try:
+                logger.debug(f"Processing audio with background music: URL={music_file_url}, volume={music_volume_db}dB")
+                music_response = requests.get(music_file_url, timeout=30)
+                if music_response.status_code != 200:
+                    return create_error_response(400, "Failed to download music file", f"Status: {music_response.status_code}")
+
+                # Load music into pydub
+                music_segment = AudioSegment.from_file(io.BytesIO(music_response.content), format="mp3")
+
+                # Adjust music volume
+                music_segment = music_segment + music_volume_db
+
+                # Loop music to match audio duration if needed
+                audio_duration_ms = len(audio_segment)
+                music_duration_ms = len(music_segment)
+                if music_duration_ms < audio_duration_ms:
+                    loops_needed = int(audio_duration_ms // music_duration_ms) + 1
+                    music_segment = music_segment * loops_needed
+                    logger.debug(f"Looped music {loops_needed} times to match audio duration: {audio_duration_ms}ms")
+
+                # Trim music to match audio duration
+                music_segment = music_segment[:audio_duration_ms]
+
+                # Overlay music
+                audio_segment = audio_segment.overlay(music_segment)
+                logger.debug("Successfully overlaid background music")
+
+            except RequestException as e:
+                logger.error(f"Failed to download music file: {str(e)}")
+                return create_error_response(500, "Failed to download music file", str(e))
+            except Exception as e:
+                logger.error(f"Failed to process music file: {str(e)}")
+                return create_error_response(500, "Failed to process music file", str(e))
+
+        # Save final audio to temporary file
+        final_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+        audio_segment.export(final_temp.name, format="mp3")
+
+        # Read and return the audio
+        with open(final_temp.name, 'rb') as f:
             audio_bytes = f.read()
-        os.unlink(audio_file)
-        
+        os.unlink(final_temp.name)
+        os.unlink(audio_file)  # Clean up the original audio file
+
+        # Set filename based on music usage
+        final_file_name = "generated_audio_with_music.mp3" if use_background_music else "generated_audio.mp3"
         response = HttpResponse(audio_bytes, content_type='audio/mp3')
-        response['Content-Disposition'] = f'attachment; filename="{audio_file_name}"'
-        logger.debug(f"Generated audio file: {audio_file_name}")
+        response['Content-Disposition'] = f'attachment; filename="{final_file_name}"'
+        logger.info(f"Audio generated successfully{' with background music' if use_background_music else ''}")
         return response
+
+    except json.JSONDecodeError:
+        logger.error("Invalid JSON in request body")
+        return create_error_response(400, "Invalid JSON format in request body")
     except ValueError as ve:
         logger.error(f"Generate audio validation error: {str(ve)}")
         return create_error_response(400, str(ve))

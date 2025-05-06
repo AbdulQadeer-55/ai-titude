@@ -524,14 +524,6 @@ main > *:not(.voice-section) {
   margin-bottom: 0.5rem;
 }
 
-.settings-summary strong {
-  color: #2d3748;
-}
-
-.App.dark .settings-summary strong {
-  color: #e2e8f0;
-}
-
 /* Audio Player */
 .audio-player {
   margin-top: 1.5rem;
@@ -758,4 +750,58 @@ main > *:not(.voice-section) {
 .App.dark .voice-note.warning {
   color: #feb2b2;
   background: rgba(245, 101, 101, 0.3);
+}
+
+/* Checkbox for Use Background Music */
+.form-group input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  border: 2px solid #4fd1c5;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.8);
+  cursor: pointer;
+  transition: all 0.3s ease;
+  vertical-align: middle;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.App.dark .form-group input[type="checkbox"] {
+  background: rgba(45, 55, 72, 0.8);
+  border-color: #63b3ed;
+}
+
+.form-group input[type="checkbox"]:checked {
+  background: #4fd1c5;
+  position: relative;
+}
+
+.App.dark .form-group input[type="checkbox"]:checked {
+  background: #63b3ed;
+}
+
+.form-group input[type="checkbox"]:checked::after {
+  content: '✔';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: #fff;
+  font-size: 12px;
+}
+
+.form-group input[type="checkbox"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Disabled Slider */
+.form-group input[type="range"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Settings Summary Spacing */
+.settings-summary li {
+  margin-bottom: 0.75rem; /* Increased from 0.5rem for better spacing */
 }

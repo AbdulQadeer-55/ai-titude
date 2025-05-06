@@ -51,6 +51,8 @@ function App() {
   const [musicError, setMusicError] = useState('');
   const [isMusicLoading, setIsMusicLoading] = useState(false);
   const [musicDuration, setMusicDuration] = useState(90);
+  const [useBackgroundMusic, setUseBackgroundMusic] = useState(false);
+  const [musicVolumeDb, setMusicVolumeDb] = useState(-20.0);
 
   const textAreaRef = useRef(null);
 
@@ -459,6 +461,10 @@ function App() {
       setErrorMessage('Audio generation is disabled due to gender mismatch.');
       return;
     }
+    if (useBackgroundMusic && !musicLink) {
+      setErrorMessage('Please generate music first to use background music.');
+      return;
+    }
     setIsLoading(true);
     setErrorMessage('');
     try {
@@ -492,6 +498,14 @@ function App() {
         voiceSettingsPayload.audio_effects = voiceSettings.audio_effects;
       }
 
+      console.log('Generating audio with:', {
+        textLength: extractedText.length,
+        ttsProvider,
+        useBackgroundMusic,
+        musicFileUrl: useBackgroundMusic ? musicLink : 'none',
+        musicVolumeDb: useBackgroundMusic ? musicVolumeDb : 'none'
+      });
+
       const response = await axios.post(
         'http://localhost:8000/api/generate-audio/',
         {
@@ -499,11 +513,16 @@ function App() {
           voice_settings_list: [voiceSettingsPayload],
           detected_gender: detectedGender,
           tts_provider: ttsProvider,
+          use_background_music: useBackgroundMusic,
+          music_file_url: useBackgroundMusic ? musicLink : undefined,
+          music_volume_db: useBackgroundMusic ? musicVolumeDb : undefined
         },
         { responseType: 'blob' }
       );
+      const filename = useBackgroundMusic ? 'generated_audio_with_music.mp3' : 'generated_audio.mp3';
       const url = window.URL.createObjectURL(new Blob([response.data], { type: 'audio/mp3' }));
       setAudioUrl(url);
+      console.log('Audio generated successfully:', { filename, url });
     } catch (error) {
       let message = 'An unexpected error occurred while generating audio.';
       if (error.response) {
@@ -521,19 +540,18 @@ function App() {
         }
       }
       setErrorMessage(message);
+      console.error('Audio generation failed:', message);
     } finally {
       setIsLoading(false);
     }
   };
 
   const generatePromptBasedMusic = async () => {
-    // Stricter validation for musicPrompt
     if (!musicPrompt || typeof musicPrompt !== 'string' || !musicPrompt.trim()) {
       console.warn('Invalid music prompt:', musicPrompt);
       setMusicError('Please enter a valid music prompt.');
       return;
     }
-    // Validate duration
     if (!Number.isInteger(musicDuration) || musicDuration < 30 || musicDuration > 420) {
       console.warn('Invalid music duration:', musicDuration);
       setMusicError('Duration must be between 30 and 420 seconds.');
@@ -589,6 +607,8 @@ function App() {
     setGenderWarning('');
     setTtsProvider('gpt4o_mini');
     setMusicDuration(90);
+    setUseBackgroundMusic(false);
+    setMusicVolumeDb(-20.0);
     setVoiceSettings({
       language_code: 'ur-PK',
       voice_name: 'coral',
@@ -1095,6 +1115,50 @@ function App() {
                       </div>
 
                       <div className="form-group">
+                        <label htmlFor="use-background-music">
+                          Use Background Music
+                          <span className="tooltip">
+                            <FaInfoCircle aria-hidden="true" />
+                            <span className="tooltip-text">Include generated music as background in the audio.</span>
+                          </span>
+                        </label>
+                        <input
+                          type="checkbox"
+                          id="use-background-music"
+                          checked={useBackgroundMusic}
+                          onChange={(e) => setUseBackgroundMusic(e.target.checked)}
+                          disabled={!musicLink}
+                          aria-label="Use background music in audio"
+                        />
+                        {!musicLink && (
+                          <span className="voice-note">
+                            Generate music first to enable background music.
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="form-group">
+                        <label htmlFor="music-volume-db">
+                          Music Volume: {musicVolumeDb} dB
+                          <span className="tooltip">
+                            <FaInfoCircle aria-hidden="true" />
+                            <span className="tooltip-text">Adjust the volume of the background music (-30 to 0 dB).</span>
+                          </span>
+                        </label>
+                        <input
+                          type="range"
+                          id="music-volume-db"
+                          value={musicVolumeDb}
+                          onChange={(e) => setMusicVolumeDb(parseFloat(e.target.value))}
+                          min="-30"
+                          max="0"
+                          step="0.1"
+                          disabled={!useBackgroundMusic || !musicLink}
+                          aria-label={`Music volume: ${musicVolumeDb} dB`}
+                        />
+                      </div>
+
+                      <div className="form-group">
                         <label htmlFor="music-prompt-suggestion">
                           Suggested Music Prompts
                           <span className="tooltip">
@@ -1187,6 +1251,14 @@ function App() {
                       <li>
                         <strong>Voice</strong>: {voiceSettings.voice_name} ({voiceSettings.gender})
                       </li>
+                      <li>
+                        <strong>Background Music</strong>: {useBackgroundMusic ? 'Yes' : 'No'}
+                      </li>
+                      {useBackgroundMusic && (
+                        <li>
+                          <strong>Music Volume</strong>: {musicVolumeDb} dB
+                        </li>
+                      )}
                       {ttsProvider === 'gpt4o_mini' && (
                         <>
                           <li>
@@ -1271,7 +1343,7 @@ function App() {
                 <div className="audio-player">
                   <h3>Generated Audio</h3>
                   <audio controls src={audioUrl} aria-label="Play generated audio" />
-                  <a href={audioUrl} download="generated_audio.mp3" className="download-button">
+                  <a href={audioUrl} download={useBackgroundMusic ? "generated_audio_with_music.mp3" : "generated_audio.mp3"} className="download-button">
                     Download Audio
                   </a>
                 </div>
