@@ -11,8 +11,8 @@ from django.http import JsonResponse, HttpResponse
 from django.core.files.storage import FileSystemStorage
 from django.conf import settings
 from django.core.cache import cache
-from rest_framework.decorators import api_view
-from rest_framework import status
+from rest_framework.decorators import api_view, throttle_classes
+from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 from google.cloud import documentai_v1 as documentai
 from google.cloud import texttospeech
 from google.api_core.client_options import ClientOptions
@@ -223,7 +223,7 @@ def get_available_voices():
         language_voices = {}
         for voice in voices:
             for language_code in voice.language_codes:
-                if language_code not in language_voices:
+                if (language_code not in language_voices):
                     language_voices[language_code] = []
                 language_voices[language_code].append({
                     'name': voice.name,
@@ -622,7 +622,14 @@ def text_to_speech(text, voice_settings_list, base_file_name, detected_gender, t
         logger.error(f"Error generating audio: {str(e)}")
         raise
 
+class CustomAnonThrottle(AnonRateThrottle):
+    rate = '30/minute'  # Adjust this value based on your needs
+
+class CustomUserThrottle(UserRateThrottle):
+    rate = '60/minute'  # Adjust this value based on your needs
+
 @api_view(['POST'])
+@throttle_classes([CustomAnonThrottle, CustomUserThrottle])
 def analyze_files(request):
     logger.debug("Received analyze_files request")
     try:
