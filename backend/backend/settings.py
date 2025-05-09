@@ -129,7 +129,7 @@ REST_FRAMEWORK = {
         'rest_framework.throttling.AnonRateThrottle',
     ],
     'DEFAULT_THROTTLE_RATES': {
-        'audio_generation': '10/minute',
+        'audio_generation': '60/minute',
         'anon': '10/hour',
         'user': '100/day',
     },

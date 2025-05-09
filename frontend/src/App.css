@@ -327,18 +327,22 @@ main > *:not(.voice-section) {
 
 /* Text Section */
 .editable-text {
+  max-height: 300px; /* Set a maximum height */
+  overflow-y: auto; /* Add a scrollbar for overflow */
+  border: 1px solid #ccc; /* Add a border for better visibility */
+  padding: 10px; /* Add padding for readability */
+  resize: none; /* Prevent resizing */
+  white-space: pre-wrap; /* Preserve spaces and line breaks */
+  word-wrap: break-word; /* Prevent long words from breaking the layout */
+  direction: rtl; /* Ensure proper direction for Urdu text */
   min-height: 200px;
-  border: none;
   border-radius: 12px;
-  padding: 1.5rem;
   background: rgba(255, 255, 255, 0.8);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
-  direction: rtl;
   text-align: right;
   font-family: 'Noto Nastaliq Urdu', serif;
   font-size: 1.1rem;
   color: #2d3748;
-  white-space: pre-wrap;
   outline: none;
 }
 
@@ -805,3 +809,4 @@ main > *:not(.voice-section) {
 .settings-summary li {
   margin-bottom: 0.75rem; /* Increased from 0.5rem for better spacing */
 }
+

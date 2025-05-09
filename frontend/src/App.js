@@ -159,6 +159,49 @@ function App() {
     []
   );
 
+  const highlightIncorrectWordsInDOM = () => {
+    const el = textAreaRef.current;
+    const text = extractedText || el.innerText;
+    if (!text) return;
+
+    // Save the current cursor position
+    const selection = window.getSelection();
+    const range = selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+
+    // Split text by whitespace while preserving spaces
+    const parts = text.split(/(\s+)/);
+    el.innerHTML = ''; // Clear the content
+
+    let charIndex = 0;
+    parts.forEach((part, index) => {
+      const span = document.createElement('span');
+      span.textContent = part;
+
+      const isWord = index % 2 === 0 && part.trim().length > 0;
+      const start = charIndex;
+      const end = charIndex + part.length;
+      charIndex += part.length;
+
+      if (isWord && !dictionary.has(part.trim())) {
+        span.className = 'incorrect-word';
+        span.setAttribute('data-start', start);
+        span.setAttribute('data-end', end);
+        const icon = document.createElement('span');
+        icon.className = 'warning-icon';
+        icon.textContent = '⚠️';
+        span.appendChild(icon);
+      }
+
+      el.appendChild(span);
+    });
+
+    // Restore the cursor position
+    if (range) {
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+  };
+
   const gpt4oVoices = useMemo(
     () => [
       { name: 'alloy', gender: 'NEUTRAL', language_code: 'ur-PK' },
@@ -278,49 +321,41 @@ function App() {
     validateSettings();
   }, [voiceSettings]);
 
+  useEffect(() => {
+    if (extractedText) {
+      highlightIncorrectWordsInDOM();
+    }
+  }, [extractedText, dictionary]);
+
   const handleTextChange = (e) => {
-    const text = e.target.innerText;
-    setExtractedText(text);
+    const rawText = textAreaRef.current.innerText;
+    setExtractedText(rawText);
   };
 
-  const highlightIncorrectWords = (text) => {
-    if (!text) return null;
-    const parts = text.split(/(\s+)/);
-    let charIndex = 0;
+  const placeCursorAtEnd = (el) => {
+    const range = document.createRange();
+    const sel = window.getSelection();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  };
 
-    return parts.map((part, index) => {
-      const key = `${part}-${index}`;
-      if (index % 2 === 0 && part.trim().length > 0) {
-        const start = charIndex;
-        charIndex += part.length;
-        if (!dictionary.has(part)) {
-          return (
-            <span
-              key={key}
-              className="incorrect-word"
-              data-start={start}
-              data-end={start + part.length}
-            >
-              {part}
-              <span className="warning-icon">
-                <FaExclamationTriangle aria-label="Incorrect word warning" />
-              </span>
-            </span>
-          );
-        }
-        return <span key={key}>{part}</span>;
-      } else {
-        charIndex += part.length;
-        return <span key={key}>{part}</span>;
-      }
-    });
+  const escapeHTML = (str) => {
+    return str
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   };
 
   const handleWordClick = (e) => {
-    if (e.target.classList.contains('incorrect-word')) {
-      const word = e.target.innerText.replace(/[^a-zA-Z\u0600-\u06FF]/g, '');
-      const start = parseInt(e.target.getAttribute('data-start'), 10);
-      const end = parseInt(e.target.getAttribute('data-end'), 10);
+    if (e.target.classList.contains('incorrect-word') || e.target.parentElement.classList.contains('incorrect-word')) {
+      const span = e.target.classList.contains('incorrect-word') ? e.target : e.target.parentElement;
+      const word = span.innerText.replace(/⚠️/, '').trim();
+      const start = parseInt(span.getAttribute('data-start'), 10);
+      const end = parseInt(span.getAttribute('data-end'), 10);
       showSuggestions(word, start, end);
     }
   };
@@ -347,7 +382,10 @@ function App() {
     const newText = before + suggestion + after;
     setExtractedText(newText);
     setModalIsOpen(false);
-    setTimeout(() => textAreaRef.current.focus(), 0);
+    setTimeout(() => {
+      textAreaRef.current.focus();
+      highlightIncorrectWordsInDOM();
+    }, 0);
   };
 
   const toggleTheme = () => {
@@ -727,9 +765,9 @@ function App() {
                   onInput={handleTextChange}
                   onClick={handleWordClick}
                   aria-label="Editable text with highlighted incorrect words"
-                  dir="rtl"
+                  suppressContentEditableWarning={true}
                 >
-                  {highlightIncorrectWords(extractedText)}
+                  {extractedText}
                 </div>
               </div>
               <div className="emotion-display">
@@ -762,7 +800,7 @@ function App() {
                         <span className="tooltip-text">
                           Choose the TTS provider. GPT-4o mini offers advanced emotional control.
                         </span>
-                      </span>
+                        </span>
                     </label>
                     <select
                       id="tts-provider"
@@ -821,31 +859,31 @@ function App() {
                       </span>
                     </label>
                     <select
-                      id="voice-name"
-                      value={voiceSettings.voice_name}
-                      onChange={(e) => updateVoiceSetting('voice_name', e.target.value)}
-                      disabled={availableVoices.length === 0 && ttsProvider !== 'gpt4o_mini'}
-                    >
-                      {ttsProvider === 'gpt4o_mini' ? (
-                        gpt4oVoices
-                          .filter((voice) => voice.language_code === voiceSettings.language_code)
-                          .map((voice) => (
-                            <option key={voice.name} value={voice.name}>
-                              {voice.name} ({voice.gender})
-                            </option>
-                          ))
-                      ) : availableVoices.length === 0 ? (
-                        <option value="">Loading...</option>
-                      ) : (
-                        availableVoices
-                          .find((lang) => lang.language_code === voiceSettings.language_code)
-                          ?.voices.map((voice) => (
-                            <option key={voice.name} value={voice.name}>
-                              {voice.name} ({voice.gender})
-                            </option>
-                          )) || <option value="">No voices available</option>
-                      )}
-                    </select>
+  id="voice-name"
+  value={voiceSettings.voice_name}
+  onChange={(e) => updateVoiceSetting('voice_name', e.target.value)}
+  disabled={availableVoices.length === 0 && ttsProvider !== 'gpt4o_mini'}
+>
+  {ttsProvider === 'gpt4o_mini' ? (
+    gpt4oVoices
+      .filter((voice) => voice.language_code === voiceSettings.language_code)
+      .map((voice) => (
+        <option key={voice.name} value={voice.name}>
+          {voice.name} ({voice.gender})
+        </option>
+      ))
+  ) : availableVoices.length === 0 ? (
+    <option value="">Loading...</option>
+  ) : (
+    availableVoices
+      .find((lang) => lang.language_code === voiceSettings.language_code)
+      ?.voices.map((voice) => (
+        <option key={voice.name} value={voice.name}>
+          {voice.name} ({voice.gender})
+        </option>
+      )) || <option value="">No voices available</option>
+  )}
+</select>
                     {genderWarning && <span className="voice-note warning">{genderWarning}</span>}
                   </div>
 
