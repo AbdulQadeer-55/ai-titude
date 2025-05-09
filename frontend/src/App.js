@@ -161,45 +161,73 @@ function App() {
 
   const highlightIncorrectWordsInDOM = () => {
     const el = textAreaRef.current;
-    const text = extractedText || el.innerText;
-    if (!text) return;
-
-    // Save the current cursor position
+    if (!el) return;
+  
+    // Save the current selection
     const selection = window.getSelection();
-    const range = selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
-
-    // Split text by whitespace while preserving spaces
-    const parts = text.split(/(\s+)/);
-    el.innerHTML = ''; // Clear the content
-
+    const cursorPosition = selection.anchorOffset;
+    const text = extractedText || el.innerText;
+    
+    if (!text) return;
+  
+    // Split text while preserving spaces and newlines
+    const parts = text.split(/(\s+)/g);
+    
+    // Create a document fragment for better performance
+    const fragment = document.createDocumentFragment();
     let charIndex = 0;
+  
     parts.forEach((part, index) => {
       const span = document.createElement('span');
       span.textContent = part;
-
+  
       const isWord = index % 2 === 0 && part.trim().length > 0;
       const start = charIndex;
       const end = charIndex + part.length;
       charIndex += part.length;
-
+  
       if (isWord && !dictionary.has(part.trim())) {
         span.className = 'incorrect-word';
         span.setAttribute('data-start', start);
         span.setAttribute('data-end', end);
-        const icon = document.createElement('span');
-        icon.className = 'warning-icon';
-        icon.textContent = '⚠️';
-        span.appendChild(icon);
       }
-
-      el.appendChild(span);
+  
+      fragment.appendChild(span);
     });
-
-    // Restore the cursor position
-    if (range) {
-      selection.removeAllRanges();
-      selection.addRange(range);
-    }
+  
+    // Clear and update content
+    el.innerHTML = '';
+    el.appendChild(fragment);
+  
+    // Restore cursor position
+    requestAnimationFrame(() => {
+      try {
+        if (el.childNodes.length > 0) {
+          const range = document.createRange();
+          let currentLength = 0;
+          let targetNode = el.childNodes[0];
+          let targetOffset = cursorPosition;
+  
+          // Find the correct node and offset
+          for (const node of el.childNodes) {
+            if (currentLength + node.textContent.length >= cursorPosition) {
+              targetNode = node;
+              targetOffset = cursorPosition - currentLength;
+              break;
+            }
+            currentLength += node.textContent.length;
+          }
+  
+          range.setStart(targetNode, Math.min(targetOffset, targetNode.textContent.length));
+          range.setEnd(targetNode, Math.min(targetOffset, targetNode.textContent.length));
+          
+          selection.removeAllRanges();
+          selection.addRange(range);
+        }
+      } catch (err) {
+        console.error('Error restoring cursor position:', err);
+      }
+    });
   };
 
   const gpt4oVoices = useMemo(
@@ -328,8 +356,33 @@ function App() {
   }, [extractedText, dictionary]);
 
   const handleTextChange = (e) => {
-    const rawText = textAreaRef.current.innerText;
+    const selection = window.getSelection();
+    const cursorPosition = selection.anchorOffset;
+    const rawText = e.target.innerText;
     setExtractedText(rawText);
+    
+    // Preserve cursor position after state update
+    requestAnimationFrame(() => {
+      const el = textAreaRef.current;
+      if (!el) return;
+      
+      const range = document.createRange();
+      const sel = window.getSelection();
+      
+      try {
+        // Try to set cursor at the saved position
+        if (el.childNodes.length > 0) {
+          const textNode = el.childNodes[0];
+          const newPosition = Math.min(cursorPosition, textNode.length);
+          range.setStart(textNode, newPosition);
+          range.setEnd(textNode, newPosition);
+          sel.removeAllRanges();
+          sel.addRange(range);
+        }
+      } catch (err) {
+        console.error('Error restoring cursor position:', err);
+      }
+    });
   };
 
   const placeCursorAtEnd = (el) => {
@@ -764,7 +817,17 @@ function App() {
                   contentEditable
                   onInput={handleTextChange}
                   onClick={handleWordClick}
-                  aria-label="Editable text with highlighted incorrect words"
+                  dir="rtl"
+                  style={{
+                    minHeight: '100px',
+                    maxHeight: '300px',
+                    overflowY: 'auto',
+                    padding: '12px',
+                    border: '1px solid #ccc',
+                    borderRadius: '4px',
+                    lineHeight: '1.5',
+                    textAlign: 'right'
+                  }}
                   suppressContentEditableWarning={true}
                 >
                   {extractedText}
