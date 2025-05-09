@@ -53,9 +53,7 @@ function App() {
   const [musicDuration, setMusicDuration] = useState(90);
   const [useBackgroundMusic, setUseBackgroundMusic] = useState(false);
   const [musicVolumeDb, setMusicVolumeDb] = useState(-20.0);
-
   const textAreaRef = useRef(null);
-
   const emotionOptions = useMemo(
     () => [
       'neutral',
@@ -77,9 +75,7 @@ function App() {
     ],
     []
   );
-
   const secondaryEmotionOptions = useMemo(() => ['none', ...emotionOptions], [emotionOptions]);
-
   const toneOptions = useMemo(
     () => [
       'empathetic',
@@ -95,7 +91,6 @@ function App() {
     ],
     []
   );
-
   const styleOptions = useMemo(
     () => [
       'conversational',
@@ -121,9 +116,7 @@ function App() {
     ],
     []
   );
-
   const pauseFrequencyOptions = useMemo(() => ['low', 'medium', 'high'], []);
-
   const instructionTemplates = useMemo(
     () => ({
       none: '',
@@ -136,7 +129,6 @@ function App() {
     }),
     []
   );
-
   const musicPromptTemplates = useMemo(
     () => ({
       neutral: 'A 90-second ambient track with a neutral and balanced mood.',
@@ -162,39 +154,39 @@ function App() {
   const highlightIncorrectWordsInDOM = () => {
     const el = textAreaRef.current;
     if (!el) return;
-  
+
     // Save the current selection
     const selection = window.getSelection();
     const cursorPosition = selection.anchorOffset;
     const text = extractedText || el.innerText;
     
     if (!text) return;
-  
+
     // Split text while preserving spaces and newlines
     const parts = text.split(/(\s+)/g);
-    
+
     // Create a document fragment for better performance
     const fragment = document.createDocumentFragment();
     let charIndex = 0;
-  
+
     parts.forEach((part, index) => {
       const span = document.createElement('span');
       span.textContent = part;
-  
+
       const isWord = index % 2 === 0 && part.trim().length > 0;
       const start = charIndex;
       const end = charIndex + part.length;
       charIndex += part.length;
-  
+
       if (isWord && !dictionary.has(part.trim())) {
         span.className = 'incorrect-word';
         span.setAttribute('data-start', start);
         span.setAttribute('data-end', end);
       }
-  
+
       fragment.appendChild(span);
     });
-  
+
     // Clear and update content
     el.innerHTML = '';
     el.appendChild(fragment);
@@ -217,10 +209,9 @@ function App() {
             }
             currentLength += node.textContent.length;
           }
-  
+
           range.setStart(targetNode, Math.min(targetOffset, targetNode.textContent.length));
           range.setEnd(targetNode, Math.min(targetOffset, targetNode.textContent.length));
-          
           selection.removeAllRanges();
           selection.addRange(range);
         }
@@ -360,7 +351,7 @@ function App() {
     const cursorPosition = selection.anchorOffset;
     const rawText = e.target.innerText;
     setExtractedText(rawText);
-    
+
     // Preserve cursor position after state update
     requestAnimationFrame(() => {
       const el = textAreaRef.current;
@@ -368,7 +359,7 @@ function App() {
       
       const range = document.createRange();
       const sel = window.getSelection();
-      
+
       try {
         // Try to set cursor at the saved position
         if (el.childNodes.length > 0) {
@@ -455,6 +446,7 @@ function App() {
       setErrorMessage('Please select at least one file to upload.');
       return;
     }
+
     setIsLoading(true);
     setErrorMessage('');
     const formData = new FormData();
@@ -565,7 +557,7 @@ function App() {
           : ''
       }${voiceSettings.tone} tone, ${voiceSettings.style} style, with pacing at ${voiceSettings.pacing}% and pause frequency set to ${
         voiceSettings.pause_frequency
-      }.`;
+      }.`; 
 
       if (voiceSettings.emphasis_words) {
         instructions += ` Emphasize the following words: ${voiceSettings.emphasis_words}.`;
@@ -610,6 +602,7 @@ function App() {
         },
         { responseType: 'blob' }
       );
+
       const filename = useBackgroundMusic ? 'generated_audio_with_music.mp3' : 'generated_audio.mp3';
       const url = window.URL.createObjectURL(new Blob([response.data], { type: 'audio/mp3' }));
       setAudioUrl(url);
@@ -722,6 +715,36 @@ function App() {
     });
     console.log('App reset');
   };
+
+  const handleCombinedGeneration = async () => {
+    setIsLoading(true);
+    setErrorMessage('');
+  
+    try {
+      // Generate music first if background music is enabled
+      if (useBackgroundMusic) {
+        setIsMusicLoading(true);
+        try {
+          await generatePromptBasedMusic();
+        } catch (error) {
+          throw new Error('Failed to generate background music: ' + error.message);
+        } finally {
+          setIsMusicLoading(false);
+        }
+      }
+  
+      // Generate audio with or without music
+      await handleGenerateAudio();
+    } catch (error) {
+      setErrorMessage(error.message || 'Failed to generate audio');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Add or update these state variables
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [combinedAudioUrl, setCombinedAudioUrl] = useState(null);
 
   return (
     <div className={`App ${theme}`}>
@@ -863,7 +886,7 @@ function App() {
                         <span className="tooltip-text">
                           Choose the TTS provider. GPT-4o mini offers advanced emotional control.
                         </span>
-                        </span>
+                      </span>
                     </label>
                     <select
                       id="tts-provider"
@@ -922,31 +945,31 @@ function App() {
                       </span>
                     </label>
                     <select
-  id="voice-name"
-  value={voiceSettings.voice_name}
-  onChange={(e) => updateVoiceSetting('voice_name', e.target.value)}
-  disabled={availableVoices.length === 0 && ttsProvider !== 'gpt4o_mini'}
->
-  {ttsProvider === 'gpt4o_mini' ? (
-    gpt4oVoices
-      .filter((voice) => voice.language_code === voiceSettings.language_code)
-      .map((voice) => (
-        <option key={voice.name} value={voice.name}>
-          {voice.name} ({voice.gender})
-        </option>
-      ))
-  ) : availableVoices.length === 0 ? (
-    <option value="">Loading...</option>
-  ) : (
-    availableVoices
-      .find((lang) => lang.language_code === voiceSettings.language_code)
-      ?.voices.map((voice) => (
-        <option key={voice.name} value={voice.name}>
-          {voice.name} ({voice.gender})
-        </option>
-      )) || <option value="">No voices available</option>
-  )}
-</select>
+                      id="voice-name"
+                      value={voiceSettings.voice_name}
+                      onChange={(e) => updateVoiceSetting('voice_name', e.target.value)}
+                      disabled={availableVoices.length === 0 && ttsProvider !== 'gpt4o_mini'}
+                    >
+                      {ttsProvider === 'gpt4o_mini' ? (
+                        gpt4oVoices
+                          .filter((voice) => voice.language_code === voiceSettings.language_code)
+                          .map((voice) => (
+                            <option key={voice.name} value={voice.name}>
+                              {voice.name} ({voice.gender})
+                            </option>
+                          ))
+                      ) : availableVoices.length === 0 ? (
+                        <option value="">Loading...</option>
+                      ) : (
+                        availableVoices
+                          .find((lang) => lang.language_code === voiceSettings.language_code)
+                          ?.voices.map((voice) => (
+                            <option key={voice.name} value={voice.name}>
+                              {voice.name} ({voice.gender})
+                            </option>
+                          )) || <option value="">No voices available</option>
+                      )}
+                    </select>
                     {genderWarning && <span className="voice-note warning">{genderWarning}</span>}
                   </div>
 
@@ -1195,7 +1218,6 @@ function App() {
                           aria-label="Enter prompt for music generation"
                         />
                       </div>
-
                       <div className="form-group">
                         <label htmlFor="music-duration">
                           Music Duration (seconds)
@@ -1214,7 +1236,6 @@ function App() {
                           aria-label="Music duration in seconds"
                         />
                       </div>
-
                       <div className="form-group">
                         <label htmlFor="use-background-music">
                           Use Background Music
@@ -1423,39 +1444,108 @@ function App() {
                   </div>
                 </div>
               )}
+            </section>
 
-              <button
-                onClick={handleGenerateAudio}
-                disabled={isLoading || (ttsProvider === 'google' && detectedGender !== 'unknown' && detectedGender !== voiceSettings.gender.toLowerCase())}
-                className="generate-audio"
-                aria-label="Generate audio from text"
-              >
-                {isLoading ? <span className="spinner" aria-label="Loading"></span> : 'Generate Audio'}
-              </button>
-              <button
-                onClick={generatePromptBasedMusic}
-                disabled={isMusicLoading || !musicPrompt || !musicPrompt.trim()}
-                className="generate-music"
-                aria-label="Generate music from prompt"
-              >
-                {isMusicLoading ? <span className="spinner" aria-label="Loading"></span> : 'Generate Music'}
-              </button>
-              {audioUrl && (
-                <div className="audio-player">
-                  <h3>Generated Audio</h3>
-                  <audio controls src={audioUrl} aria-label="Play generated audio" />
-                  <a href={audioUrl} download={useBackgroundMusic ? "generated_audio_with_music.mp3" : "generated_audio.mp3"} className="download-button">
-                    Download Audio
-                  </a>
+            <section className="section audio-section">
+              <h2>🎵 Audio Generation</h2>
+              <div className="audio-controls-container">
+                <div className="audio-generation-options">
+                  <h3>🎵 Audio Generation Options</h3>
+                  <div className="form-group">
+                    <label>
+                      <input
+                        type="checkbox"
+                        checked={useBackgroundMusic}
+                        onChange={(e) => setUseBackgroundMusic(e.target.checked)}
+                      />
+                      Include Background Music
+                    </label>
+                  </div>
+                  {useBackgroundMusic && (
+                    <div className="music-settings">
+                      <h4>Background Music Settings</h4>
+                      <div className="form-group">
+                        <label htmlFor="music-prompt">
+                          Music Description
+                          <span className="tooltip">
+                            <FaInfoCircle />
+                            <span className="tooltip-text">
+                              Describe the music you want to generate
+                            </span>
+                          </span>
+                        </label>
+                        <textarea
+                          id="music-prompt"
+                          value={musicPrompt}
+                          onChange={(e) => setMusicPrompt(e.target.value)}
+                          placeholder="e.g., A calm and soothing melody with soft piano"
+                          rows="3"
+                        />
+                        <div className="form-group">
+                          <label>Duration: {musicDuration} seconds</label>
+                          <input
+                            type="range"
+                            value={musicDuration}
+                            onChange={(e) => setMusicDuration(parseInt(e.target.value))}
+                            min="30"
+                            max="420"
+                            step="30"
+                          />
+                        </div>
+                        <div className="form-group">
+                          <label>Music Volume: {musicVolumeDb}dB</label>
+                          <input
+                            type="range"
+                            value={musicVolumeDb}
+                            onChange={(e) => setMusicVolumeDb(parseFloat(e.target.value))}
+                            min="-30"
+                            max="0"
+                            step="1"
+                          />
+                        </div>
+                        <button
+                          onClick={applyEmotionBasedPrompt}
+                          className="action-button"
+                        >
+                          Use Emotion-based Music
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              )}
-              {musicLink && (
-                <div className="music-player">
-                  <h3>Generated Music</h3>
-                  <audio key={musicLink} controls src={musicLink} aria-label="Play generated music" />
-                  <a href={musicLink} download="generated_music.mp3" className="download-button">
-                    Download Music
-                  </a>
+
+                <div className="generation-buttons">
+                  <button
+                    onClick={handleCombinedGeneration}
+                    disabled={isLoading || (ttsProvider === 'google' && detectedGender !== 'unknown' && detectedGender !== voiceSettings.gender.toLowerCase())}
+                    className="generate-combined"
+                    aria-label="Generate audio and music"
+                  >
+                    {isLoading ? <span className="spinner" aria-label="Loading"></span> : 'Generate Audio and Music'}
+                  </button>
+                </div>
+              </div>
+
+              {(audioUrl || musicLink) && (
+                <div className="music-preview">
+                  {audioUrl && (
+                    <div className="audio-player">
+                      <h4>Generated Audio</h4>
+                      <audio controls src={audioUrl} aria-label="Play generated audio" />
+                      <a href={audioUrl} download={useBackgroundMusic ? "generated_audio_with_music.mp3" : "generated_audio.mp3"} className="download-button">
+                        Download Audio
+                      </a>
+                    </div>
+                  )}
+                  {musicLink && (
+                    <div className="music-player">
+                      <h3>Generated Music</h3>
+                      <audio key={musicLink} controls src={musicLink} aria-label="Play generated music" />
+                      <a href={musicLink} download="generated_music.mp3" className="download-button">
+                        Download Music
+                      </a>
+                    </div>
+                  )}
                 </div>
               )}
             </section>
