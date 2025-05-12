@@ -1198,7 +1198,7 @@ function App() {
                         {warnings.instructions && <span className="voice-note warning">{warnings.instructions}</span>}
                       </div>
 
-                      <div className="form-group">
+                      {/* <div className="form-group">
                         <label htmlFor="prompt-based-music-generation">
                           Music Prompt
                           <span className="tooltip">
@@ -1357,7 +1357,7 @@ function App() {
                           step="1"
                           aria-label={`Volume gain: ${voiceSettings.volume_gain_db} dB`}
                         />
-                      </div>
+                      </div> */}
                     </>
                   )}
 
