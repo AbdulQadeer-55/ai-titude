@@ -23,6 +23,7 @@ from requests.exceptions import RequestException
 from pydub import AudioSegment
 from django.views.decorators.csrf import csrf_exempt
 import io
+import base64
 
 load_dotenv()
 
@@ -85,7 +86,7 @@ def create_error_response(code, message, details=None):
 
 def process_document(file_path, mime_type, is_batch=False):
     try:
-        credentials_path = "/home/abdulqadeer/Downloads/ai-titude/credentials.json"
+        credentials_path = os.getenv('GOOGLE_CREDENTIALS_PATH', '/home/abdulqadeer/Downloads/ai-titude/credentials.json')
         if not os.path.exists(credentials_path):
             raise FileNotFoundError("Google Cloud credentials file not found")
         credentials = service_account.Credentials.from_service_account_file(credentials_path)
@@ -214,7 +215,7 @@ def detect_gender_with_ai(text):
 
 def get_available_voices():
     try:
-        credentials_path = "/home/abdulqadeer/Downloads/ai-titude/credentials.json"
+        credentials_path = os.getenv('GOOGLE_CREDENTIALS_PATH', '/home/abdulqadeer/Downloads/ai-titude/credentials.json')
         if not os.path.exists(credentials_path):
             raise FileNotFoundError("Google Cloud credentials file not found")
         credentials = service_account.Credentials.from_service_account_file(credentials_path)
@@ -223,7 +224,7 @@ def get_available_voices():
         language_voices = {}
         for voice in voices:
             for language_code in voice.language_codes:
-                if (language_code not in language_voices):
+                if language_code not in language_voices:
                     language_voices[language_code] = []
                 language_voices[language_code].append({
                     'name': voice.name,
@@ -250,7 +251,7 @@ def get_available_voices():
                     {'name': 'onyx', 'gender': 'NEUTRAL', 'language_code': 'ur-PK'},
                     {'name': 'nova', 'gender': 'NEUTRAL', 'language_code': 'ur-PK'},
                     {'name': 'sage', 'gender': 'NEUTRAL', 'language_code': 'ur-PK'},
-                    {'name': 'shimmer', 'gender': 'NEUTRAL', 'language_code': 'ur-PK'}      
+                    {'name': 'shimmer', 'gender': 'NEUTRAL', 'language_code': 'ur-PK'}
                 ]
             }
         ]
@@ -263,23 +264,54 @@ def get_available_voices():
         logger.error(f"Error fetching available voices: {str(e)}")
         raise
 
+def mix_audio(tts_audio_bytes, music_file_url, music_volume_db):
+    try:
+        # Load TTS audio from bytes
+        tts_segment = AudioSegment.from_file(io.BytesIO(tts_audio_bytes), format="mp3")
+        
+        # Download and load music
+        music_response = requests.get(music_file_url, timeout=30)
+        if music_response.status_code != 200:
+            raise RequestException(f"Failed to download music file: HTTP {music_response.status_code}")
+        music_segment = AudioSegment.from_file(io.BytesIO(music_response.content), format="mp3")
+        
+        # Adjust music volume
+        music_segment = music_segment + music_volume_db
+        
+        # Match durations
+        audio_duration_ms = len(tts_segment)
+        music_duration_ms = len(music_segment)
+        if music_duration_ms < audio_duration_ms:
+            loops_needed = int(audio_duration_ms // music_duration_ms) + 1
+            music_segment = music_segment * loops_needed
+            logger.debug(f"Looped music {loops_needed} times to match audio duration: {audio_duration_ms}ms")
+        music_segment = music_segment[:audio_duration_ms]
+        
+        # Overlay audio
+        combined = tts_segment.overlay(music_segment)
+        
+        # Export to bytes
+        output = io.BytesIO()
+        combined.export(output, format="mp3")
+        return output.getvalue(), None
+    except RequestException as e:
+        logger.error(f"Failed to download music file: {str(e)}")
+        return None, str(e)
+    except Exception as e:
+        logger.error(f"Failed to mix audio: {str(e)}")
+        return None, f"Failed to process audio: {str(e)}"
+
 @csrf_exempt
 def generate_music_with_prompt(request):
-    """
-    Generate music based on a user-provided prompt and duration using the Loudly API.
-    """
     if request.method != "POST":
         return create_error_response(405, "Only POST requests allowed")
 
     try:
-        # Parse request body
         body_unicode = request.body.decode("utf-8")
         body = json.loads(body_unicode)
         prompt = body.get("prompt")
-        duration = body.get("duration", 90)  # Default to 90 seconds
-        logger.debug(f"Incoming request: prompt={prompt}, duration={duration}")
+        duration = body.get("duration", 90)
 
-        # Validate inputs
         if prompt is None:
             return create_error_response(400, "Prompt is missing", "The 'prompt' field is required in the request body")
         if not isinstance(prompt, str):
@@ -292,11 +324,9 @@ def generate_music_with_prompt(request):
         if not isinstance(duration, int) or not (30 <= duration <= 420):
             return create_error_response(400, "Invalid duration", "Duration must be an integer between 30 and 420 seconds")
 
-        # Check Loudly API key
         if not LOUDLY_API_KEY:
             return create_error_response(500, "Loudly API key is not configured")
 
-        # Common headers
         headers = {
             "API-KEY": LOUDLY_API_KEY,
             "Content-Type": "application/json",
@@ -305,14 +335,12 @@ def generate_music_with_prompt(request):
             "Cache-Control": "no-cache"
         }
 
-        # Try multiple payload formats
         payload_variations = [
             {"prompt": prompt, "duration": duration},
             {"Prompt": prompt, "duration": duration},
             {"data": {"prompt": prompt, "duration": duration}}
         ]
 
-        # Try multiple endpoints
         endpoints = [
             "https://soundtracks-dev.loudly.com/api/ai/prompt/songs",
             "https://soundtracks.loudly.com/b2b/ai/prompt/songs"
@@ -339,7 +367,6 @@ def generate_music_with_prompt(request):
                             return create_error_response(500, "Invalid JSON response from Loudly API")
                     
                     elif response.status_code != 400:
-                        # If not a 400 error, stop trying this endpoint
                         break
                     
                 except requests.RequestException as e:
@@ -355,7 +382,6 @@ def generate_music_with_prompt(request):
                     logger.error(f"Loudly API error at {endpoint}: status={response.status_code}, text={response.text}")
                     return create_error_response(response.status_code, "Failed to generate music", response.text)
 
-        # If all JSON attempts fail, try form data as a fallback
         form_headers = {
             "API-KEY": LOUDLY_API_KEY,
             "Accept": "application/json",
@@ -392,7 +418,6 @@ def generate_music_with_prompt(request):
             logger.error(f"Network error calling Loudly API with form data: {str(e)}")
             return create_error_response(500, "Network error", str(e))
 
-        # If all attempts fail
         return create_error_response(400, "Failed to generate music", "All attempts to contact Loudly API failed. Please check API configuration.")
 
     except json.JSONDecodeError:
@@ -521,7 +546,7 @@ def text_to_speech(text, voice_settings_list, base_file_name, detected_gender, t
                 speed = 2.0
 
             plain_text = text.replace('.', '. ')
-            print(f"Plain Text Input: {plain_text}")
+            logger.debug(f"Plain Text Input: {plain_text}")
 
             headers = {
                 "Authorization": f"Bearer {GPT4O_MINI_TTS_API_KEY}",
@@ -567,7 +592,7 @@ def text_to_speech(text, voice_settings_list, base_file_name, detected_gender, t
             if detected_gender != "unknown" and detected_gender != voice_settings['gender'].lower():
                 raise ValueError(f"Gender mismatch: Text is detected as {detected_gender}, but selected voice is {voice_settings['gender'].lower()}.")
             
-            credentials_path = "/home/abdulqadeer/Downloads/ai-titude/credentials.json"
+            credentials_path = os.getenv('GOOGLE_CREDENTIALS_PATH', '/home/abdulqadeer/Downloads/ai-titude/credentials.json')
             if not os.path.exists(credentials_path):
                 raise FileNotFoundError("Google Cloud credentials file not found")
             credentials = service_account.Credentials.from_service_account_file(credentials_path)
@@ -623,10 +648,10 @@ def text_to_speech(text, voice_settings_list, base_file_name, detected_gender, t
         raise
 
 class CustomAnonThrottle(AnonRateThrottle):
-    rate = '30/minute'  # Adjust this value based on your needs
+    rate = '30/minute'
 
 class CustomUserThrottle(UserRateThrottle):
-    rate = '60/minute'  # Adjust this value based on your needs
+    rate = '60/minute'
 
 @api_view(['POST'])
 @throttle_classes([CustomAnonThrottle, CustomUserThrottle])
@@ -682,6 +707,7 @@ def analyze_files(request):
         return create_error_response(500, "An unexpected error occurred.", str(e))
 
 @api_view(['POST'])
+@throttle_classes([CustomAnonThrottle, CustomUserThrottle])
 def generate_audio(request):
     logger.debug(f"Received generate_audio request: {request.body}")
     try:
@@ -692,7 +718,7 @@ def generate_audio(request):
         tts_provider = data.get('tts_provider', 'google')
         use_background_music = data.get('use_background_music', False)
         music_file_url = data.get('music_file_url')
-        music_volume_db = data.get('music_volume_db', -20.0)
+        music_volume_db = float(data.get('music_volume_db', -20.0))
 
         # Validate inputs
         if not text:
@@ -718,61 +744,32 @@ def generate_audio(request):
         base_file_name = "generated_audio"
         audio_file, audio_file_name, warning = text_to_speech(text, voice_settings_list, base_file_name, detected_gender, tts_provider)
 
-        # Load generated audio
-        audio_segment = AudioSegment.from_mp3(audio_file)
+        try:
+            # Read generated audio
+            with open(audio_file, 'rb') as f:
+                tts_audio_bytes = f.read()
+            audio_segment = AudioSegment.from_mp3(audio_file)
 
-        # Handle background music if enabled
-        if use_background_music and music_file_url:
-            try:
+            # Handle background music if enabled
+            if use_background_music and music_file_url:
                 logger.debug(f"Processing audio with background music: URL={music_file_url}, volume={music_volume_db}dB")
-                music_response = requests.get(music_file_url, timeout=30)
-                if music_response.status_code != 200:
-                    return create_error_response(400, "Failed to download music file", f"Status: {music_response.status_code}")
+                mixed_audio_bytes, error = mix_audio(tts_audio_bytes, music_file_url, music_volume_db)
+                if error:
+                    return create_error_response(400, "Failed to mix audio", error)
+                audio_bytes = mixed_audio_bytes
+            else:
+                audio_bytes = tts_audio_bytes
 
-                # Load music into pydub
-                music_segment = AudioSegment.from_file(io.BytesIO(music_response.content), format="mp3")
+            # Return the audio
+            final_file_name = "generated_audio_with_music.mp3" if use_background_music else "generated_audio.mp3"
+            response = HttpResponse(audio_bytes, content_type='audio/mp3')
+            response['Content-Disposition'] = f'attachment; filename="{final_file_name}"'
+            logger.info(f"Audio generated successfully{' with background music' if use_background_music else ''}")
+            return response
 
-                # Adjust music volume
-                music_segment = music_segment + music_volume_db
-
-                # Loop music to match audio duration if needed
-                audio_duration_ms = len(audio_segment)
-                music_duration_ms = len(music_segment)
-                if music_duration_ms < audio_duration_ms:
-                    loops_needed = int(audio_duration_ms // music_duration_ms) + 1
-                    music_segment = music_segment * loops_needed
-                    logger.debug(f"Looped music {loops_needed} times to match audio duration: {audio_duration_ms}ms")
-
-                # Trim music to match audio duration
-                music_segment = music_segment[:audio_duration_ms]
-
-                # Overlay music
-                audio_segment = audio_segment.overlay(music_segment)
-                logger.debug("Successfully overlaid background music")
-
-            except RequestException as e:
-                logger.error(f"Failed to download music file: {str(e)}")
-                return create_error_response(500, "Failed to download music file", str(e))
-            except Exception as e:
-                logger.error(f"Failed to process music file: {str(e)}")
-                return create_error_response(500, "Failed to process music file", str(e))
-
-        # Save final audio to temporary file
-        final_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
-        audio_segment.export(final_temp.name, format="mp3")
-
-        # Read and return the audio
-        with open(final_temp.name, 'rb') as f:
-            audio_bytes = f.read()
-        os.unlink(final_temp.name)
-        os.unlink(audio_file)  # Clean up the original audio file
-
-        # Set filename based on music usage
-        final_file_name = "generated_audio_with_music.mp3" if use_background_music else "generated_audio.mp3"
-        response = HttpResponse(audio_bytes, content_type='audio/mp3')
-        response['Content-Disposition'] = f'attachment; filename="{final_file_name}"'
-        logger.info(f"Audio generated successfully{' with background music' if use_background_music else ''}")
-        return response
+        finally:
+            if os.path.exists(audio_file):
+                os.unlink(audio_file)
 
     except json.JSONDecodeError:
         logger.error("Invalid JSON in request body")
@@ -785,6 +782,7 @@ def generate_audio(request):
         return create_error_response(500, "Failed to generate audio.", str(e))
 
 @api_view(['GET'])
+@throttle_classes([CustomAnonThrottle, CustomUserThrottle])
 def available_voices(request):
     logger.debug("Received available_voices request")
     try:
@@ -796,3 +794,50 @@ def available_voices(request):
     except Exception as e:
         logger.error(f"Available voices error: {str(e)}")
         return create_error_response(500, "Failed to fetch available voices.", str(e))
+
+@api_view(['POST'])
+@throttle_classes([CustomAnonThrottle, CustomUserThrottle])
+def mix_audio_endpoint(request):
+    logger.debug(f"Received mix_audio request: {request.body}")
+    try:
+        data = json.loads(request.body)
+        tts_audio_base64 = data.get('tts_audio', '')
+        music_file_url = data.get('music_file_url', '')
+        music_volume_db = float(data.get('music_volume_db', -20.0))
+
+        # Validate inputs
+        if not tts_audio_base64:
+            return create_error_response(400, "Missing TTS audio", "Provide 'tts_audio' in base64 format")
+        if not music_file_url:
+            return create_error_response(400, "Missing music file URL", "Provide 'music_file_url'")
+        if not isinstance(music_volume_db, (int, float)):
+            return create_error_response(400, "Invalid music volume", "music_volume_db must be a number")
+        if music_volume_db < -30.0 or music_volume_db > 0.0:
+            return create_error_response(400, "Invalid music volume", "music_volume_db must be between -30.0 and 0.0 dB")
+
+        # Decode TTS audio
+        try:
+            tts_audio_bytes = base64.b64decode(tts_audio_base64)
+        except Exception as e:
+            return create_error_response(400, "Invalid TTS audio format", f"Failed to decode base64: {str(e)}")
+
+        # Mix audio
+        mixed_audio_bytes, error = mix_audio(tts_audio_bytes, music_file_url, music_volume_db)
+        if error:
+            return create_error_response(400, "Failed to mix audio", error)
+
+        # Return the mixed audio
+        response = HttpResponse(mixed_audio_bytes, content_type='audio/mp3')
+        response['Content-Disposition'] = 'attachment; filename="mixed_audio.mp3"'
+        logger.info("Mixed audio generated successfully")
+        return response
+
+    except json.JSONDecodeError:
+        logger.error("Invalid JSON in request body")
+        return create_error_response(400, "Invalid JSON format in request body")
+    except ValueError as ve:
+        logger.error(f"Mix audio validation error: {str(ve)}")
+        return create_error_response(400, str(ve))
+    except Exception as e:
+        logger.error(f"Mix audio error: {str(e)}")
+        return create_error_response(500, "Failed to mix audio.", str(e))
