@@ -136,7 +136,7 @@ function App() {
       sincere: 'A 90-second piano ballad with a sincere and heartfelt mood.',
       calm: 'A 120-second chillout track with a calm and soothing atmosphere, featuring soft pads.',
       serene: 'A 120-second orchestral piece with a serene and tranquil mood, featuring strings and harp.',
-      sadness: 'A 90-second melancholic piano track with a sad and reflective tone.',
+      sadness: 'A 90-second melancholic piloader.load()ano track with a sad and reflective tone.',
       happiness: 'A 90-second upbeat pop track with a happy and cheerful vibe, featuring bright synths.',
       fear: 'A 90-second cinematic track with a fearful and tense atmosphere, featuring eerie strings.',
       horror: 'A 90-second dark ambient track with a horrified and unsettling mood, featuring distorted drones.',
@@ -732,7 +732,6 @@ function App() {
           setIsMusicLoading(false);
         }
       }
-  
       // Generate audio with or without music
       await handleGenerateAudio();
     } catch (error) {
@@ -745,6 +744,10 @@ function App() {
   // Add or update these state variables
   const [isGenerating, setIsGenerating] = useState(false);
   const [combinedAudioUrl, setCombinedAudioUrl] = useState(null);
+  const [voiceVolume, setVoiceVolume] = useState(1.0);
+  const [musicVolume, setMusicVolume] = useState(0.3);
+  const [mixId, setMixId] = useState(null);
+  const [isMixing, setIsMixing] = useState(false);
 
   return (
     <div className={`App ${theme}`}>
@@ -821,7 +824,6 @@ function App() {
                 {files.map((file, idx) => (
                   <li key={idx} className="file-item">
                     <span className="file-name">{file.name}</span>
-                    <span className="file-size">({(file.size / 1024).toFixed(2)} KB)</span>
                   </li>
                 ))}
               </ul>
@@ -872,9 +874,9 @@ function App() {
                 tabIndex={0}
                 onKeyPress={(e) => e.key === 'Enter' && setVoiceSectionExpanded(!voiceSectionExpanded)}
                 aria-expanded={voiceSectionExpanded}
-                aria-label="Toggle voice and music settings section"
+                aria-label="Toggle voice settings section"
               >
-                🎙️ Voice and Music Settings {voiceSectionExpanded ? '▼' : '▶'}
+                🎙️ Voice Settings {voiceSectionExpanded ? '▼' : '▶'}
               </h2>
               {voiceSectionExpanded && (
                 <div className="voice-card">
