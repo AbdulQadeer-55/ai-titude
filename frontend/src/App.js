@@ -842,8 +842,8 @@ function App() {
             </button>
           </div>
         )}
-
-        <section className="section file-upload">
+        <div class="center-wrapper">
+         <section className="section file-upload">
           <h2 className="upload-title">
             <span className="upload-icon">📤</span> Upload Your Files
           </h2>
@@ -874,7 +874,7 @@ function App() {
               )}
             </button>
             <button onClick={resetApp} className="reset-button" aria-label="Reset application">
-              <span className="button-icon">🔄</span> Reset
+              <span className="button-icon">🔄 </span> Reset
             </button>
           </div>
           {files.length > 0 && (
@@ -890,6 +890,7 @@ function App() {
             </div>
           )}
         </section>
+        </div>
 
         {extractedText && (
           <>
