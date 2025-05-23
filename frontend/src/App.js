@@ -1402,7 +1402,6 @@ function App() {
               <h2>🎵 Audio Generation</h2>
               <div className="audio-controls-container">
                 <div className="audio-generation-options">
-                  <h3>🎵 Audio Generation Options</h3>
                   <div className="form-group">
                     <label>
                       <input
