@@ -338,20 +338,17 @@ body {
   min-height: 200px;
   max-height: 400px;
   overflow-y: auto;
-  font-size: 1rem;
-  line-height: 1.6;
+  font-family: var(--font-urdu, 'Noto Nastaliq Urdu', sans-serif);
+  font-size: 1.2rem;
+  line-height: 2;
   direction: rtl;
   text-align: right;
   transition: var(--transition);
-  font-family: inherit;
-  font-family: var(--font-urdu);
-  font-size: 1.2rem; /* Larger font size for better Urdu readability */
-  line-height: 2; /* Increased line height for Nastaliq script */
-  padding: 1.5rem;
-  word-spacing: 0.1em;
-  letter-spacing: 0.02em;
+  word-spacing: 0.1em; /* Test and adjust */
+  letter-spacing: 0.02em; /* Test and adjust */
+  unicode-bidi: embed;
+  resize: vertical;
 }
-
 .App.dark .editable-text {
   background-color: #1e293b;
   border-color: #334155;
@@ -359,11 +356,10 @@ body {
 }
 
 .editable-text:focus {
+  border-color: var(--primary-color, #2563eb);
   outline: none;
-  border-color: var(--primary-color);
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.3);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.2);
 }
-
 .incorrect-word {
   position: relative;
   cursor: pointer;

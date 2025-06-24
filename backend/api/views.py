@@ -24,6 +24,7 @@ from pydub import AudioSegment
 from django.views.decorators.csrf import csrf_exempt
 import io
 import base64
+import math
 
 load_dotenv()
 
@@ -47,6 +48,9 @@ MAX_FILES_PER_BATCH = 5000
 MAX_PAGES_ONLINE_DEFAULT = 15
 MAX_PAGES_IMAGELESS = 30
 MAX_TEXT_LENGTH = 10000
+GOOGLE_TTS_MAX_BYTES = 5000
+OPENAI_TTS_MAX_CHARS = 4096
+OPENAI_TTS_RATE_LIMIT_RPM = 50
 
 EMOTION_MAPPING = {
     "neutral": "neutral",
@@ -155,7 +159,7 @@ def extract_text_from_file(file_path, file_extension):
 
 def get_gemini_response(prompt, document_text):
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-2.0-flash')
         content = [document_text, prompt]
         response = model.generate_content(content)
         if not response.text:
@@ -187,7 +191,7 @@ def detect_emotions_with_ai(text):
     prompt = f"""
     Analyze the following text and identify the single most prominent emotion from this list: {', '.join(emotion_list)}.
     The text may be in Urdu, English, or a mix of both or any other language. Provide only the most dominant emotion as a single word or phrase.
-    Text: "{text}"
+    Text and avoid any irrelevant text: "{text}"
     """
     try:
         response = get_gemini_response(prompt, text)
@@ -266,19 +270,12 @@ def get_available_voices():
 
 def mix_audio(tts_audio_bytes, music_file_url, music_volume_db):
     try:
-        # Load TTS audio from bytes
         tts_segment = AudioSegment.from_file(io.BytesIO(tts_audio_bytes), format="mp3")
-        
-        # Download and load music
         music_response = requests.get(music_file_url, timeout=30)
         if music_response.status_code != 200:
             raise RequestException(f"Failed to download music file: HTTP {music_response.status_code}")
         music_segment = AudioSegment.from_file(io.BytesIO(music_response.content), format="mp3")
-        
-        # Adjust music volume
         music_segment = music_segment + music_volume_db
-        
-        # Match durations
         audio_duration_ms = len(tts_segment)
         music_duration_ms = len(music_segment)
         if music_duration_ms < audio_duration_ms:
@@ -286,11 +283,7 @@ def mix_audio(tts_audio_bytes, music_file_url, music_volume_db):
             music_segment = music_segment * loops_needed
             logger.debug(f"Looped music {loops_needed} times to match audio duration: {audio_duration_ms}ms")
         music_segment = music_segment[:audio_duration_ms]
-        
-        # Overlay audio
         combined = tts_segment.overlay(music_segment)
-        
-        # Export to bytes
         output = io.BytesIO()
         combined.export(output, format="mp3")
         return output.getvalue(), None
@@ -430,6 +423,32 @@ def generate_music_with_prompt(request):
         logger.error(f"Unexpected error in generate_music_with_prompt: {str(e)}", exc_info=True)
         return create_error_response(500, "An unexpected error occurred", str(e))
 
+def split_text_into_chunks(text, max_size, is_byte_size=False):
+    """
+    Split text into chunks respecting sentence boundaries.
+    If is_byte_size is True, max_size is in bytes; otherwise, it's in characters.
+    """
+    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+    chunks = []
+    current_chunk = ""
+    current_size = 0
+
+    for sentence in sentences:
+        sentence_size = len(sentence.encode('utf-8')) if is_byte_size else len(sentence)
+        if current_size + sentence_size <= max_size:
+            current_chunk += sentence + " "
+            current_size += sentence_size
+        else:
+            if current_chunk:
+                chunks.append(current_chunk.strip())
+            current_chunk = sentence + " "
+            current_size = sentence_size
+    
+    if current_chunk:
+        chunks.append(current_chunk.strip())
+    
+    return chunks
+
 def text_to_speech(text, voice_settings_list, base_file_name, detected_gender, tts_provider="google"):
     logger.debug(f"Starting text_to_speech: provider={tts_provider}, text_length={len(text)}, voice_settings={voice_settings_list}")
     try:
@@ -437,7 +456,9 @@ def text_to_speech(text, voice_settings_list, base_file_name, detected_gender, t
             raise ValueError(f"Text exceeds the maximum length of {MAX_TEXT_LENGTH} characters for audio generation.")
         
         voice_settings = voice_settings_list[0]
-        
+        temp_files = []
+        combined = AudioSegment.empty()
+
         if tts_provider == "gpt4o_mini":
             logger.debug("Using GPT-4o mini TTS")
             required_fields = ['voice_name']
@@ -534,52 +555,69 @@ def text_to_speech(text, voice_settings_list, base_file_name, detected_gender, t
             if pause_frequency not in valid_pause_frequencies:
                 raise ValueError(f"Invalid pause frequency: {pause_frequency}. Supported values: {valid_pause_frequencies}")
 
-            if emphasis_words:
-                words_to_emphasize = [word.strip() for word in emphasis_words.split(',')]
-                for word in words_to_emphasize:
-                    text = text.replace(word, f'<emphasis level="strong">{word}</emphasis>')
-
             speed = pacing / 100.0
             if speed < 0.5:
                 speed = 0.5
             elif speed > 2.0:
                 speed = 2.0
 
-            plain_text = text.replace('.', '. ')
-            logger.debug(f"Plain Text Input: {plain_text}")
-
+            chunks = split_text_into_chunks(text, OPENAI_TTS_MAX_CHARS, is_byte_size=False)
+            logger.debug(f"Split text into {len(chunks)} chunks for OpenAI TTS")
             headers = {
                 "Authorization": f"Bearer {GPT4O_MINI_TTS_API_KEY}",
                 "Content-Type": "application/json"
             }
-            payload = {
-                "model": "gpt-4o-mini-tts",
-                "input": plain_text,
-                "voice": voice_settings['voice_name'],
-                "response_format": "mp3",
-                "speed": speed
-            }
-            if 'instructions' in voice_settings:
-                payload['instructions'] = voice_settings['instructions']
-            
-            logger.debug(f"GPT-4o mini TTS payload: {payload}")
-            
-            response = requests.post(
-                "https://api.openai.com/v1/audio/speech",
-                headers=headers,
-                json=payload,
-                timeout=30
-            )
-            
-            if response.status_code != 200:
-                logger.error(f"GPT-4o mini TTS API error: {response.status_code} - {response.text}")
-                raise Exception(f"GPT-4o mini TTS API error: {response.text}")
+            requests_per_minute = OPENAI_TTS_RATE_LIMIT_RPM
+            delay_between_requests = 60.0 / requests_per_minute
+
+            for i, chunk in enumerate(chunks):
+                if emphasis_words:
+                    words_to_emphasize = [word.strip() for word in emphasis_words.split(',')]
+                    for word in words_to_emphasize:
+                        chunk = chunk.replace(word, f'<emphasis level="strong">{word}</emphasis>')
+                plain_text = chunk.replace('.', '. ')
+                payload = {
+                    "model": "gpt-4o-mini-tts",
+                    "input": plain_text,
+                    "voice": voice_settings['voice_name'],
+                    "response_format": "mp3",
+                    "speed": speed
+                }
+                if 'instructions' in voice_settings:
+                    payload['instructions'] = voice_settings['instructions']
+                
+                logger.debug(f"OpenAI TTS chunk {i+1}/{len(chunks)} payload: {payload}")
+                
+                response = requests.post(
+                    "https://api.openai.com/v1/audio/speech",
+                    headers=headers,
+                    json=payload,
+                    timeout=30
+                )
+                
+                if response.status_code != 200:
+                    logger.error(f"OpenAI TTS API error for chunk {i+1}: {response.status_code} - {response.text}")
+                    raise Exception(f"OpenAI TTS API error: {response.text}")
+                
+                temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=f"_chunk{i}.mp3")
+                with open(temp_file.name, "wb") as out:
+                    out.write(response.content)
+                temp_files.append(temp_file.name)
+                logger.debug(f"Saved OpenAI TTS chunk {i+1} to {temp_file.name}")
+                
+                if i < len(chunks) - 1:
+                    time.sleep(delay_between_requests)
+
+            for temp_file in temp_files:
+                audio_segment = AudioSegment.from_mp3(temp_file)
+                combined += audio_segment
             
             final_file_name = f"{base_file_name.rsplit('.', 1)[0]}.mp3"
             final_temp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
-            with open(final_temp.name, "wb") as out:
-                out.write(response.content)
-            logger.debug(f"Saved GPT-4o mini audio to {final_temp.name}")
+            combined.export(final_temp.name, format="mp3")
+            for temp_file in temp_files:
+                os.unlink(temp_file)
+            logger.debug(f"Saved OpenAI TTS combined audio to {final_temp.name}")
             
             return final_temp.name, final_file_name, None
         
@@ -597,10 +635,10 @@ def text_to_speech(text, voice_settings_list, base_file_name, detected_gender, t
                 raise FileNotFoundError("Google Cloud credentials file not found")
             credentials = service_account.Credentials.from_service_account_file(credentials_path)
             client = texttospeech.TextToSpeechClient(credentials=credentials)
-            MAX_BYTES = 5000
+            
             text = text.replace('\n', ' ').strip()
-            temp_files = []
-            combined = AudioSegment.empty()
+            chunks = split_text_into_chunks(text, GOOGLE_TTS_MAX_BYTES, is_byte_size=True)
+            logger.debug(f"Split text into {len(chunks)} chunks for Google Cloud TTS")
             
             voice = texttospeech.VoiceSelectionParams(
                 language_code=voice_settings['language_code'],
@@ -615,7 +653,6 @@ def text_to_speech(text, voice_settings_list, base_file_name, detected_gender, t
                 effects_profile_id=voice_settings.get('audio_effects', [])
             )
             
-            chunks = [text[i:i+MAX_BYTES] for i in range(0, len(text), MAX_BYTES)]
             for i, chunk in enumerate(chunks):
                 synthesis_input = texttospeech.SynthesisInput(text=chunk)
                 response = client.synthesize_speech(input=synthesis_input, voice=voice, audio_config=audio_config)
@@ -623,6 +660,7 @@ def text_to_speech(text, voice_settings_list, base_file_name, detected_gender, t
                 with open(temp_file.name, "wb") as out:
                     out.write(response.audio_content)
                 temp_files.append(temp_file.name)
+                logger.debug(f"Saved Google TTS chunk {i+1} to {temp_file.name}")
             
             for temp_file in temp_files:
                 audio_segment = AudioSegment.from_mp3(temp_file)
@@ -633,7 +671,7 @@ def text_to_speech(text, voice_settings_list, base_file_name, detected_gender, t
             combined.export(final_temp.name, format="mp3")
             for temp_file in temp_files:
                 os.unlink(temp_file)
-            logger.debug(f"Saved Google Cloud audio to {final_temp.name}")
+            logger.debug(f"Saved Google Cloud TTS combined audio to {final_temp.name}")
             
             return final_temp.name, final_file_name, None
     
@@ -720,7 +758,6 @@ def generate_audio(request):
         music_file_url = data.get('music_file_url')
         music_volume_db = float(data.get('music_volume_db', -20.0))
 
-        # Validate inputs
         if not text:
             return create_error_response(400, "No text provided.")
         if len(text) > MAX_TEXT_LENGTH:
@@ -740,17 +777,14 @@ def generate_audio(request):
         if use_background_music and (music_volume_db < -30.0 or music_volume_db > 0.0):
             return create_error_response(400, "Invalid music volume", "music_volume_db must be between -30.0 and 0.0 dB")
 
-        # Generate audio using text_to_speech
         base_file_name = "generated_audio"
         audio_file, audio_file_name, warning = text_to_speech(text, voice_settings_list, base_file_name, detected_gender, tts_provider)
 
         try:
-            # Read generated audio
             with open(audio_file, 'rb') as f:
                 tts_audio_bytes = f.read()
             audio_segment = AudioSegment.from_mp3(audio_file)
 
-            # Handle background music if enabled
             if use_background_music and music_file_url:
                 logger.debug(f"Processing audio with background music: URL={music_file_url}, volume={music_volume_db}dB")
                 mixed_audio_bytes, error = mix_audio(tts_audio_bytes, music_file_url, music_volume_db)
@@ -760,7 +794,6 @@ def generate_audio(request):
             else:
                 audio_bytes = tts_audio_bytes
 
-            # Return the audio
             final_file_name = "generated_audio_with_music.mp3" if use_background_music else "generated_audio.mp3"
             response = HttpResponse(audio_bytes, content_type='audio/mp3')
             response['Content-Disposition'] = f'attachment; filename="{final_file_name}"'
@@ -805,7 +838,6 @@ def mix_audio_endpoint(request):
         music_file_url = data.get('music_file_url', '')
         music_volume_db = float(data.get('music_volume_db', -20.0))
 
-        # Validate inputs
         if not tts_audio_base64:
             return create_error_response(400, "Missing TTS audio", "Provide 'tts_audio' in base64 format")
         if not music_file_url:
@@ -815,18 +847,15 @@ def mix_audio_endpoint(request):
         if music_volume_db < -30.0 or music_volume_db > 0.0:
             return create_error_response(400, "Invalid music volume", "music_volume_db must be between -30.0 and 0.0 dB")
 
-        # Decode TTS audio
         try:
             tts_audio_bytes = base64.b64decode(tts_audio_base64)
         except Exception as e:
             return create_error_response(400, "Invalid TTS audio format", f"Failed to decode base64: {str(e)}")
 
-        # Mix audio
         mixed_audio_bytes, error = mix_audio(tts_audio_bytes, music_file_url, music_volume_db)
         if error:
             return create_error_response(400, "Failed to mix audio", error)
 
-        # Return the mixed audio
         response = HttpResponse(mixed_audio_bytes, content_type='audio/mp3')
         response['Content-Disposition'] = 'attachment; filename="mixed_audio.mp3"'
         logger.info("Mixed audio generated successfully")

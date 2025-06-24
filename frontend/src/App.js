@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import axios from 'axios';
 import { FaExclamationTriangle, FaInfoCircle } from 'react-icons/fa';
 import Modal from 'react-modal';
@@ -80,7 +80,6 @@ function App() {
     ],
     []
   );
-  const secondaryEmotionOptions = useMemo(() => ['none', ...emotionOptions], [emotionOptions]);
   const toneOptions = useMemo(
     () => [
       'empathetic',
@@ -156,14 +155,14 @@ function App() {
     []
   );
 
-  const highlightIncorrectWordsInDOM = () => {
+  const highlightIncorrectWordsInDOM = useCallback(() => {
     const el = textAreaRef.current;
     if (!el) return;
 
     const selection = window.getSelection();
     const cursorPosition = selection.anchorOffset;
     const text = extractedText || el.innerText;
-    
+
     if (!text) return;
 
     const parts = text.split(/(\s+)/g);
@@ -190,7 +189,7 @@ function App() {
 
     el.innerHTML = '';
     el.appendChild(fragment);
-  
+
     requestAnimationFrame(() => {
       try {
         if (el.childNodes.length > 0) {
@@ -198,7 +197,7 @@ function App() {
           let currentLength = 0;
           let targetNode = el.childNodes[0];
           let targetOffset = cursorPosition;
-  
+
           for (const node of el.childNodes) {
             if (currentLength + node.textContent.length >= cursorPosition) {
               targetNode = node;
@@ -217,7 +216,7 @@ function App() {
         console.error('Error restoring cursor position:', err);
       }
     });
-  };
+  }, [textAreaRef, extractedText, dictionary]);
 
   const gpt4oVoices = useMemo(
     () => [
@@ -342,7 +341,57 @@ function App() {
     if (extractedText) {
       highlightIncorrectWordsInDOM();
     }
-  }, [extractedText, dictionary]);
+  }, [extractedText, dictionary, highlightIncorrectWordsInDOM]);
+
+  const handleMixAudio = useCallback(async () => {
+    if (!ttsAudioBase64) {
+      setMixError('No TTS audio available. Please generate audio first.');
+      return;
+    }
+    if (!musicLink) {
+      setMixError('No music available. Please generate music first.');
+      return;
+    }
+    setMixLoading(true);
+    setMixError('');
+    setMixedAudioUrl(null);
+
+    const payload = {
+      tts_audio: ttsAudioBase64,
+      music_file_url: musicLink,
+      music_volume_db: musicVolumeDb,
+    };
+
+    try {
+      const response = await axios.post('http://localhost:8000/api/mix-audio/', payload, {
+        responseType: 'blob',
+      });
+      const blob = new Blob([response.data], { type: 'audio/mp3' });
+      const url = window.URL.createObjectURL(blob);
+      setMixedAudioUrl(url);
+      console.log('Audio mixed successfully:', { filename: 'mixed_audio.mp3', url });
+    } catch (error) {
+      let message = 'Failed to mix audio.';
+      if (error.response) {
+        try {
+          const text = await error.response.data.text();
+          const errorData = JSON.parse(text);
+          message = errorData.error?.message || message;
+          const details = errorData.error?.details ? ` Details: ${errorData.error.details}` : '';
+          message += details;
+        } catch (e) {
+          message =
+            error.response.status === 500
+              ? 'Server error: Failed to mix audio. Please check the backend logs.'
+              : `Error ${error.response.status}: ${error.response.statusText}`;
+        }
+      }
+      setMixError(message);
+      console.error('Audio mixing failed:', message);
+    } finally {
+      setMixLoading(false);
+    }
+  }, [ttsAudioBase64, musicLink, musicVolumeDb, setMixError, setMixedAudioUrl, setMixLoading]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -351,7 +400,7 @@ function App() {
       }
     }, 500);
     return () => clearTimeout(timer);
-  }, [musicVolumeDb, ttsAudioBase64, musicLink, useBackgroundMusic]);
+  }, [musicVolumeDb, ttsAudioBase64, musicLink, useBackgroundMusic, handleMixAudio]);
 
   const handleTextChange = (e) => {
     const selection = window.getSelection();
@@ -362,7 +411,7 @@ function App() {
     requestAnimationFrame(() => {
       const el = textAreaRef.current;
       if (!el) return;
-      
+
       const range = document.createRange();
       const sel = window.getSelection();
 
@@ -379,24 +428,6 @@ function App() {
         console.error('Error restoring cursor position:', err);
       }
     });
-  };
-
-  const placeCursorAtEnd = (el) => {
-    const range = document.createRange();
-    const sel = window.getSelection();
-    range.selectNodeContents(el);
-    range.collapse(false);
-    sel.removeAllRanges();
-    sel.addRange(range);
-  };
-
-  const escapeHTML = (str) => {
-    return str
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
   };
 
   const handleWordClick = (e) => {
@@ -567,7 +598,7 @@ function App() {
           : ''
       }${voiceSettings.tone} tone, ${voiceSettings.style} style, with pacing at ${voiceSettings.pacing}% and pause frequency set to ${
         voiceSettings.pause_frequency
-      }.`; 
+      }.`;
 
       if (voiceSettings.emphasis_words) {
         instructions += ` Emphasize the following words: ${voiceSettings.emphasis_words}.`;
@@ -642,56 +673,6 @@ function App() {
     }
   };
 
-  const handleMixAudio = async () => {
-    if (!ttsAudioBase64) {
-      setMixError('No TTS audio available. Please generate audio first.');
-      return;
-    }
-    if (!musicLink) {
-      setMixError('No music available. Please generate music first.');
-      return;
-    }
-    setMixLoading(true);
-    setMixError('');
-    setMixedAudioUrl(null);
-
-    const payload = {
-      tts_audio: ttsAudioBase64,
-      music_file_url: musicLink,
-      music_volume_db: musicVolumeDb,
-    };
-
-    try {
-      const response = await axios.post('http://localhost:8000/api/mix-audio/', payload, {
-        responseType: 'blob',
-      });
-      const blob = new Blob([response.data], { type: 'audio/mp3' });
-      const url = window.URL.createObjectURL(blob);
-      setMixedAudioUrl(url);
-      console.log('Audio mixed successfully:', { filename: 'mixed_audio.mp3', url });
-    } catch (error) {
-      let message = 'Failed to mix audio.';
-      if (error.response) {
-        try {
-          const text = await error.response.data.text();
-          const errorData = JSON.parse(text);
-          message = errorData.error?.message || message;
-          const details = errorData.error?.details ? ` Details: ${errorData.error.details}` : '';
-          message += details;
-        } catch (e) {
-          message =
-            error.response.status === 500
-              ? 'Server error: Failed to mix audio. Please check the backend logs.'
-              : `Error ${error.response.status}: ${error.response.statusText}`;
-        }
-      }
-      setMixError(message);
-      console.error('Audio mixing failed:', message);
-    } finally {
-      setMixLoading(false);
-    }
-  };
-
   const generatePromptBasedMusic = async () => {
     if (!musicPrompt || typeof musicPrompt !== 'string' || !musicPrompt.trim()) {
       console.warn('Invalid music prompt:', musicPrompt);
@@ -728,11 +709,6 @@ function App() {
     const newPrompt = musicPromptTemplates[emotion] || `A 90-second track with a ${emotion} mood`;
     setMusicPrompt(newPrompt);
     console.log('Applied emotion-based prompt:', newPrompt);
-  };
-
-  const applyPromptSuggestion = (prompt) => {
-    setMusicPrompt(prompt);
-    console.log('Applied suggested prompt:', prompt);
   };
 
   const resetApp = () => {
@@ -842,54 +818,54 @@ function App() {
             </button>
           </div>
         )}
-        <div class="center-wrapper">
-         <section className="section file-upload">
-          <h2 className="upload-title">
-            <span className="upload-icon">📤</span> Upload Your Files
-          </h2>
-          <div className="upload-container">
-            <input
-              type="file"
-              multiple
-              onChange={handleFileChange}
-              className="file-input"
-              id="file-upload"
-              accept=".jpg,.jpeg,.png,.bmp,.tiff,.tif,.gif,.pdf,.docx,.txt"
-            />
-            <label htmlFor="file-upload" className="file-label">
-              <span className="button-icon">📂</span> Choose Files
-            </label>
-            <button
-              onClick={handleUpload}
-              disabled={isLoading || files.length === 0}
-              className="action-button"
-              aria-label="Analyze selected files"
-            >
-              {isLoading ? (
-                <span className="spinner" aria-label="Loading"></span>
-              ) : (
-                <>
-                  <span className="button-icon">🔍</span> Analyze Files
-                </>
-              )}
-            </button>
-            <button onClick={resetApp} className="reset-button" aria-label="Reset application">
-              <span className="button-icon">🔄 </span> Reset
-            </button>
-          </div>
-          {files.length > 0 && (
-            <div className="file-list">
-              <h3>Selected Files:</h3>
-              <ul>
-                {files.map((file, idx) => (
-                  <li key={idx} className="file-item">
-                    <span className="file-name">{file.name}</span>
-                  </li>
-                ))}
-              </ul>
+        <div className="center-wrapper">
+          <section className="section file-upload">
+            <h2 className="upload-title">
+              <span className="upload-icon">📤</span> Upload Your Files
+            </h2>
+            <div className="upload-container">
+              <input
+                type="file"
+                multiple
+                onChange={handleFileChange}
+                className="file-input"
+                id="file-upload"
+                accept=".jpg,.jpeg,.png,.bmp,.tiff,.tif,.gif,.pdf,.docx,.txt"
+              />
+              <label htmlFor="file-upload" className="file-label">
+                <span className="button-icon">📂</span> Choose Files
+              </label>
+              <button
+                onClick={handleUpload}
+                disabled={isLoading || files.length === 0}
+                className="action-button"
+                aria-label="Analyze selected files"
+              >
+                {isLoading ? (
+                  <span className="spinner" aria-label="Loading"></span>
+                ) : (
+                  <>
+                    <span className="button-icon">🔍</span> Analyze Files
+                  </>
+                )}
+              </button>
+              <button onClick={resetApp} className="reset-button" aria-label="Reset application">
+                <span className="button-icon">🔄 </span> Reset
+              </button>
             </div>
-          )}
-        </section>
+            {files.length > 0 && (
+              <div className="file-list">
+                <h3>Selected Files:</h3>
+                <ul>
+                  {files.map((file, idx) => (
+                    <li key={idx} className="file-item">
+                      <span className="file-name">{file.name}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </section>
         </div>
 
         {extractedText && (
@@ -912,7 +888,7 @@ function App() {
                     border: '1px solid #ccc',
                     borderRadius: '4px',
                     lineHeight: '1.5',
-                    textAlign: 'right'
+                    textAlign: 'right',
                   }}
                   suppressContentEditableWarning={true}
                 >
@@ -1040,7 +1016,7 @@ function App() {
                     <div className="gpt4o-settings">
                       <div className="form-group">
                         <label htmlFor="emotion">
-                          Base Emotion
+                          Emotion
                           <span className="tooltip">
                             <FaInfoCircle aria-hidden="true" />
                             <span className="tooltip-text">Select the primary emotion to set the voice's mood.</span>
@@ -1072,46 +1048,6 @@ function App() {
                           max="100"
                           step="1"
                           aria-label={`Emotion intensity: ${voiceSettings.emotion_intensity}%`}
-                        />
-                      </div>
-
-                      <div className="form-group">
-                        <label htmlFor="secondary-emotion">
-                          Secondary Emotion (Optional)
-                          <span className="tooltip">
-                            <FaInfoCircle aria-hidden="true" />
-                            <span className="tooltip-text">
-                              Add a secondary emotion to blend with the base emotion for nuanced expression.
-                            </span>
-                          </span>
-                        </label>
-                        <select
-                          id="secondary-emotion"
-                          value={voiceSettings.secondary_emotion}
-                          onChange={(e) => updateVoiceSetting('secondary-emotion', e.target.value)}
-                        >
-                          {secondaryEmotionOptions.map((emotion) => (
-                            <option key={emotion} value={emotion}>
-                              {emotion === 'none' ? 'None' : emotion.charAt(0).toUpperCase() + emotion.slice(1)}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div className="form-group">
-                        <label htmlFor="secondary-emotion-intensity">
-                          Secondary Emotion Intensity: {voiceSettings.secondary_emotion_intensity}%
-                        </label>
-                        <input
-                          type="range"
-                          id="secondary-emotion-intensity"
-                          value={voiceSettings.secondary_emotion_intensity}
-                          onChange={(e) => updateVoiceSetting('secondary_emotion_intensity', e.target.value)}
-                          min="0"
-                          max="100"
-                          step="1"
-                          disabled={voiceSettings.secondary_emotion === 'none'}
-                          aria-label={`Secondary emotion intensity: ${voiceSettings.secondary_emotion_intensity}%`}
                         />
                       </div>
 
@@ -1336,16 +1272,9 @@ function App() {
                       {ttsProvider === 'gpt4o_mini' && (
                         <>
                           <li>
-                            <strong>Base Emotion</strong>: {voiceSettings.emotion.charAt(0).toUpperCase() + voiceSettings.emotion.slice(1)} (
+                            <strong>Emotion</strong>: {voiceSettings.emotion.charAt(0).toUpperCase() + voiceSettings.emotion.slice(1)} (
                             {voiceSettings.emotion_intensity}%)
                           </li>
-                          {voiceSettings.secondary_emotion !== 'none' && (
-                            <li>
-                              <strong>Secondary Emotion</strong>:{' '}
-                              {voiceSettings.secondary_emotion.charAt(0).toUpperCase() + voiceSettings.secondary_emotion.slice(1)} (
-                              {voiceSettings.secondary_emotion_intensity}%)
-                            </li>
-                          )}
                           <li>
                             <strong>Tone</strong>: {voiceSettings.tone.charAt(0).toUpperCase() + voiceSettings.tone.slice(1)}
                           </li>
