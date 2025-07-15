@@ -271,11 +271,24 @@ def get_available_voices():
 def mix_audio(tts_audio_bytes, music_file_url, music_volume_db):
     try:
         tts_segment = AudioSegment.from_file(io.BytesIO(tts_audio_bytes), format="mp3")
-        music_response = requests.get(music_file_url, timeout=30)
+        logger.debug(f"TTS segment dBFS: {tts_segment.dBFS}")
+
+        music_response = requests.get(f"{music_file_url}?t={time.time()}", timeout=30)
         if music_response.status_code != 200:
             raise RequestException(f"Failed to download music file: HTTP {music_response.status_code}")
+
         music_segment = AudioSegment.from_file(io.BytesIO(music_response.content), format="mp3")
+        logger.debug(f"Initial music dBFS: {music_segment.dBFS}")
+
+        music_segment = music_segment.apply_gain(-20.0 - music_segment.dBFS)
+        logger.debug(f"Normalized music dBFS: {music_segment.dBFS}")
+
         music_segment = music_segment + music_volume_db
+        logger.debug(f"Adjusted music dBFS: {music_segment.dBFS}")
+
+        tts_segment = tts_segment.apply_gain(-10.0) 
+        logger.debug(f"Adjusted TTS dBFS: {tts_segment.dBFS}")
+
         audio_duration_ms = len(tts_segment)
         music_duration_ms = len(music_segment)
         if music_duration_ms < audio_duration_ms:
@@ -283,7 +296,10 @@ def mix_audio(tts_audio_bytes, music_file_url, music_volume_db):
             music_segment = music_segment * loops_needed
             logger.debug(f"Looped music {loops_needed} times to match audio duration: {audio_duration_ms}ms")
         music_segment = music_segment[:audio_duration_ms]
+
         combined = tts_segment.overlay(music_segment)
+        logger.debug(f"Combined dBFS: {combined.dBFS}")
+
         output = io.BytesIO()
         combined.export(output, format="mp3")
         return output.getvalue(), None
